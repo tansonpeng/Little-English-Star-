@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme {
+  --font-headline: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-on-surface: #352f00;
+  --color-surface-tint: #755700;
+  --color-secondary: #006384;
+  --color-tertiary-fixed-dim: #a6eea7;
+  --color-tertiary: #246830;
+  --color-on-error: #ffefec;
+  --color-inverse-on-surface: #a89e5f;
+  --color-on-primary-fixed-variant: #604700;
+  --color-on-secondary-fixed: #00394e;
+  --color-outline-variant: #b9ae6e;
+  --color-on-secondary: #e6f5ff;
+  --color-background: #fff7d5;
+  --color-error-container: #f95630;
+  --color-on-primary-fixed: #3d2b00;
+  --color-on-primary: #fff1db;
+  --color-surface-container-low: #fff2aa;
+  --color-primary: #755700;
+  --color-primary-fixed: #fdc003;
+  --color-secondary-container: #97daff;
+  --color-on-secondary-container: #004d68;
+  --color-secondary-dim: #005673;
+  --color-secondary-fixed: #97daff;
+  --color-surface-container-highest: #edde84;
+  --color-on-tertiary-fixed-variant: #2a6e35;
+  --color-error: #b02500;
+  --color-on-error-container: #520c00;
+  --color-outline: #81783d;
+  --color-error-dim: #b92902;
+  --color-on-primary-container: #553e00;
+  --color-surface-bright: #fff7d5;
+  --color-surface-container: #f8e999;
+  --color-on-background: #352f00;
+  --color-inverse-primary: #fdc003;
+  --color-tertiary-fixed: #b4fdb4;
+  --color-surface-variant: #edde84;
+  --color-primary-dim: #664b00;
+  --color-secondary-fixed-dim: #6ccfff;
+  --color-on-surface-variant: #655c25;
+  --color-primary-container: #fdc003;
+  --color-inverse-surface: #110e00;
+  --color-on-tertiary-fixed: #03501b;
+  --color-on-tertiary-container: #1f632c;
+  --color-tertiary-dim: #165c25;
+  --color-surface-container-high: #f2e48e;
+  --color-surface-dim: #e5d677;
+  --color-on-tertiary: #cfffcc;
+  --color-surface: #fff7d5;
+  --color-on-secondary-fixed-variant: #005775;
+  --color-tertiary-container: #b4fdb4;
+  --color-primary-fixed-dim: #ecb200;
+}
+
+@layer base {
+  body {
+    @apply bg-background font-body text-on-surface selection:bg-primary-container;
+  }
+}
+
+.path-dash {
+  stroke-dasharray: 15, 20;
+}
+
+.floating {
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}
+
+.star-glow {
+  filter: drop-shadow(0 0 30px rgba(253, 192, 3, 0.6));
+}
+
+.tactile-button-shadow {
+  box-shadow: 0 15px 0 0 rgba(0,0,0,0.1);
+}
+
+.active-press:active {
+  transform: translateY(8px);
+  box-shadow: 0 4px 0 0 rgba(0,0,0,0.1);
+}
+
+.btn-3d {
+  transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.4);
+}
+
+.btn-3d:active {
+  transform: translateY(4px) scale(0.98);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+}
