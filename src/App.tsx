@@ -109,9 +109,10 @@ export default function App() {
           />
         )}
         {currentScreen === 'KARAOKE' && (
-          <KaraokeScreen 
-            song={selectedSong} 
-            onBack={() => navigateTo('LISTEN')} 
+          <KaraokeScreen
+            song={selectedSong}
+            onBack={() => navigateTo('LISTEN')}
+            onNavigate={navigateTo}
           />
         )}
       </AnimatePresence>
@@ -375,13 +376,122 @@ function HubScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =>
       className="h-full w-full relative z-10 flex flex-col bg-night-sky"
       style={{ background: 'radial-gradient(circle at 80% 20%, #2c3e50, #000000)' }}
     >
-      {/* Decorative Stars */}
-      <div className="absolute top-28 right-12 w-48 h-48 bg-white rounded-full shadow-[0_0_80px_rgba(255,255,255,0.3)] flex items-center justify-center overflow-hidden">
-        <div className="relative w-full h-full">
-          <div className="absolute top-1/3 left-1/4 w-4 h-4 bg-on-surface-variant rounded-full"></div>
-          <div className="absolute top-1/3 right-1/4 w-4 h-4 bg-on-surface-variant rounded-full"></div>
-          <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-16 h-8 border-b-4 border-on-surface-variant rounded-full"></div>
-        </div>
+      {/* Q版睡美人 */}
+      <div className="absolute top-28 right-12 w-48 h-48 rounded-full shadow-[0_0_60px_rgba(248,100,180,0.55)] overflow-hidden">
+        <svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg" width="192" height="192">
+          <defs>
+            <radialGradient id="auroraBg192" cx="50%" cy="35%" r="70%">
+              <stop offset="0%" stopColor="#fce8f8"/>
+              <stop offset="100%" stopColor="#c84898"/>
+            </radialGradient>
+          </defs>
+
+          {/* 粉色背景 */}
+          <circle cx="96" cy="96" r="96" fill="url(#auroraBg192)"/>
+          {/* 光晕 */}
+          <circle cx="96" cy="48" r="62" fill="white" opacity="0.06"/>
+          {/* 装饰亮点 */}
+          <circle cx="168" cy="68" r="3" fill="#ffd8f0" opacity="0.6"/>
+          <circle cx="22" cy="80" r="2" fill="#ffd8f0" opacity="0.5"/>
+          <circle cx="160" cy="40" r="2.5" fill="#ffe0f8" opacity="0.5"/>
+          <circle cx="30" cy="50" r="1.8" fill="#ffd0f0" opacity="0.5"/>
+
+          {/* ===== 后发（金色飘逸） ===== */}
+          <path d="M 32 85 Q 18 110 22 142 Q 28 164 34 180 Q 44 156 42 128 Q 44 106 50 90Z" fill="#f2c030"/>
+          <path d="M 160 85 Q 174 110 170 142 Q 164 164 158 180 Q 148 156 150 128 Q 148 106 142 90Z" fill="#f2c030"/>
+          <ellipse cx="96" cy="65" rx="68" ry="60" fill="#f0c028"/>
+
+          {/* 脸 */}
+          <circle cx="96" cy="82" r="54" fill="#fde8c8"/>
+
+          {/* 顶发+刘海 */}
+          <path d="M 30 86 Q 42 22 96 18 Q 150 22 162 86 Q 142 44 96 50 Q 50 44 30 86" fill="#e0b020"/>
+          <path d="M 84 18 Q 96 14 108 18 Q 96 32 84 18" fill="#f8e070"/>
+          <path d="M 44 68 Q 56 46 72 58 Q 60 54 54 68Z" fill="#e0b020"/>
+          <path d="M 148 68 Q 136 46 120 58 Q 132 54 138 68Z" fill="#e0b020"/>
+
+          {/* ===== 大眼睛（紫色） ===== */}
+          <ellipse cx="76" cy="78" rx="15" ry="16" fill="white"/>
+          <ellipse cx="76" cy="79" rx="10.5" ry="11.5" fill="#8050c8"/>
+          <ellipse cx="76" cy="80" rx="7" ry="7.5" fill="#5030a0"/>
+          <circle cx="76" cy="81" r="4.5" fill="#10082a"/>
+          <circle cx="80" cy="75" r="3.5" fill="white"/>
+          <circle cx="73" cy="78" r="1.8" fill="white" opacity="0.7"/>
+
+          <ellipse cx="116" cy="78" rx="15" ry="16" fill="white"/>
+          <ellipse cx="116" cy="79" rx="10.5" ry="11.5" fill="#8050c8"/>
+          <ellipse cx="116" cy="80" rx="7" ry="7.5" fill="#5030a0"/>
+          <circle cx="116" cy="81" r="4.5" fill="#10082a"/>
+          <circle cx="120" cy="75" r="3.5" fill="white"/>
+          <circle cx="113" cy="78" r="1.8" fill="white" opacity="0.7"/>
+
+          {/* 眼线+睫毛左 */}
+          <path d="M 61 72 Q 76 61 91 72" stroke="#18082a" strokeWidth="3" fill="none" strokeLinecap="round"/>
+          <line x1="63" y1="73" x2="59" y2="62" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="68" y1="68" x2="65" y2="57" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="76" y1="65" x2="76" y2="55" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="84" y1="68" x2="87" y2="58" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="89" y1="72" x2="93" y2="63" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+
+          {/* 眼线+睫毛右 */}
+          <path d="M 101 72 Q 116 61 131 72" stroke="#18082a" strokeWidth="3" fill="none" strokeLinecap="round"/>
+          <line x1="103" y1="72" x2="99" y2="63" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="108" y1="68" x2="105" y2="58" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="116" y1="65" x2="116" y2="55" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="124" y1="68" x2="127" y2="58" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+          <line x1="129" y1="72" x2="133" y2="62" stroke="#18082a" strokeWidth="2.2" strokeLinecap="round"/>
+
+          {/* 眉毛 */}
+          <path d="M 60 63 Q 76 53 92 60" stroke="#b88820" strokeWidth="3.2" fill="none" strokeLinecap="round"/>
+          <path d="M 100 60 Q 116 53 132 63" stroke="#b88820" strokeWidth="3.2" fill="none" strokeLinecap="round"/>
+
+          {/* 鼻子 */}
+          <circle cx="96" cy="94" r="2.5" fill="#e0a898" opacity="0.6"/>
+
+          {/* 腮红 */}
+          <ellipse cx="60" cy="97" rx="16" ry="9" fill="#ffb8cc" opacity="0.45"/>
+          <ellipse cx="132" cy="97" rx="16" ry="9" fill="#ffb8cc" opacity="0.45"/>
+
+          {/* 嘴巴 */}
+          <path d="M 80 109 Q 96 121 112 109" stroke="#e06878" strokeWidth="3" fill="none" strokeLinecap="round"/>
+          <path d="M 80 109 Q 88 116 96 114 Q 104 116 112 109" fill="#f09898"/>
+
+          {/* ===== 皇冠 ===== */}
+          <path d="M 62 48 L 70 30 L 80 45 L 96 24 L 112 45 L 122 30 L 130 48" stroke="#f8d840" strokeWidth="3" fill="#f8d840" fillOpacity="0.15" strokeLinejoin="round"/>
+          <line x1="60" y1="50" x2="132" y2="50" stroke="#f8d840" strokeWidth="2.5"/>
+          <circle cx="70" cy="30" r="3.5" fill="#ffe880"/>
+          <circle cx="96" cy="24" r="4.5" fill="#ffe880"/>
+          <circle cx="122" cy="30" r="3.5" fill="#ffe880"/>
+          <circle cx="96" cy="24" r="5" fill="#ff88b8" opacity="0.95"/>
+          <circle cx="70" cy="30" r="4" fill="#d870f8" opacity="0.85"/>
+          <circle cx="122" cy="30" r="4" fill="#d870f8" opacity="0.85"/>
+          <circle cx="97.5" cy="22" r="1.8" fill="white" opacity="0.7"/>
+
+          {/* ===== 粉色礼服 ===== */}
+          <path d="M 0 160 Q 30 132 96 135 Q 162 132 192 160 L 192 192 L 0 192Z" fill="#f860a8"/>
+          <path d="M 0 170 Q 36 150 96 152 Q 156 150 192 170 L 192 192 L 0 192Z" fill="#e04898"/>
+          <path d="M 24 158 Q 60 144 96 143 Q 132 144 168 158" stroke="#ff9ccc" strokeWidth="1.5" fill="none" opacity="0.65"/>
+          <path d="M 14 167 Q 54 155 96 154 Q 138 155 178 167" stroke="#ff9ccc" strokeWidth="1" fill="none" opacity="0.45"/>
+          {/* 玫瑰装饰 */}
+          <g transform="translate(48,158)">
+            <circle cx="0" cy="0" r="9" fill="#ff5888"/>
+            <circle cx="0" cy="0" r="6" fill="#ff80a8"/>
+            <circle cx="0" cy="0" r="3" fill="#ffb0c8"/>
+            <circle cx="0" cy="0" r="1.2" fill="#ffe0ec"/>
+          </g>
+          <g transform="translate(144,158)">
+            <circle cx="0" cy="0" r="9" fill="#ff5888"/>
+            <circle cx="0" cy="0" r="6" fill="#ff80a8"/>
+            <circle cx="0" cy="0" r="3" fill="#ffb0c8"/>
+            <circle cx="0" cy="0" r="1.2" fill="#ffe0ec"/>
+          </g>
+
+          {/* 侧发飘动 */}
+          <path d="M 32 85 Q 22 108 24 140" stroke="#f2c030" strokeWidth="16" fill="none" strokeLinecap="round" opacity="0.9"/>
+          <path d="M 160 85 Q 170 108 168 140" stroke="#f2c030" strokeWidth="16" fill="none" strokeLinecap="round" opacity="0.9"/>
+          <path d="M 32 85 Q 22 108 24 140" stroke="#d8a018" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.35"/>
+          <path d="M 160 85 Q 170 108 168 140" stroke="#d8a018" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.35"/>
+        </svg>
       </div>
 
       <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-8 py-8">
@@ -509,7 +619,7 @@ function ListenScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: ()
       style={{ background: 'linear-gradient(180deg, #001a26 0%, #00394e 100%)' }}
     >
       <nav className="relative z-50 flex justify-between items-start p-10">
-        <HomeButton onClick={handleBack} />
+        <HomeButton onClick={() => onNavigate('MAP')} />
         <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
           <h2 className="font-headline text-5xl font-black text-white tracking-widest drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">听一听</h2>
         </div>
@@ -609,7 +719,7 @@ const LYRIC_ELEMENTS: Record<string, string[]> = {
   "night": ["🌙", "⭐"],
 };
 
-function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void }) {
+function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () => void, onNavigate: (s: Screen) => void }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentLyricIndex, setCurrentLyricIndex] = useState(0);
   const [scoreLeft, setScoreLeft] = useState(0);
@@ -685,8 +795,12 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
     setIsPlaying(!isPlaying);
   };
 
+  const totalProgress = song.content.lyrics.length > 0
+    ? Math.min(100, (currentLyricIndex * 100 + lyricProgress) / song.content.lyrics.length)
+    : 0;
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -695,7 +809,7 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
     >
       {/* Header */}
       <nav className="relative z-50 flex justify-between items-center px-6 md:px-10 py-4 md:py-6">
-        <button 
+        <button
           onClick={onBack}
           className="flex flex-col items-center gap-1 group"
         >
@@ -734,9 +848,9 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
       </nav>
 
       {/* Main Stage */}
-      <main className="flex-grow flex flex-col items-center justify-center relative z-10 px-6 md:px-20 gap-2 md:gap-4">
-        {/* PK Scores - Top of main */}
-        <div className="w-full flex justify-between items-start max-w-6xl absolute top-2 md:top-4 left-1/2 -translate-x-1/2 px-6 md:px-20">
+      <main className="flex-grow flex flex-col items-center relative z-10 px-6 md:px-20 gap-2 md:gap-4 py-2 md:py-4 min-h-0">
+        {/* PK Scores / Melody Bars */}
+        <div className="w-full flex justify-between items-center max-w-6xl flex-shrink-0">
           {isPkActive ? (
             <>
               <motion.div 
@@ -744,13 +858,91 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
                 transition={{ repeat: Infinity, duration: 1 }}
                 className="flex flex-col items-center gap-1 md:gap-3"
               >
-                <div className="w-12 h-12 md:w-20 md:h-20 rounded-full bg-error border-2 md:border-4 border-white shadow-2xl overflow-hidden">
-                  <img src="https://picsum.photos/seed/p1/100/100" className="w-full h-full object-cover" />
+                <div className="w-12 h-12 md:w-20 md:h-20 rounded-full bg-blue-400 border-2 md:border-4 border-white shadow-2xl overflow-hidden">
+                  <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+                    <defs>
+                      <radialGradient id="elsaBgP1" cx="50%" cy="35%" r="70%">
+                        <stop offset="0%" stopColor="#d8f4ff"/>
+                        <stop offset="100%" stopColor="#4898d8"/>
+                      </radialGradient>
+                    </defs>
+                    <rect width="80" height="80" fill="url(#elsaBgP1)"/>
+                    {/* 后发（白金色） */}
+                    <ellipse cx="40" cy="28" rx="26" ry="25" fill="#c8d8f8"/>
+                    {/* 脸 */}
+                    <ellipse cx="40" cy="38" rx="21" ry="22" fill="#fde8d8"/>
+                    {/* 顶发 */}
+                    <path d="M 16 28 Q 22 4 40 3 Q 58 4 64 28 Q 52 12 40 14 Q 28 12 16 28" fill="#b8c8f0"/>
+                    {/* 发丝高光 */}
+                    <path d="M 36 3 Q 40 1 44 3 Q 40 10 36 3" fill="#e0e8ff"/>
+                    {/* 左眼 */}
+                    <ellipse cx="32" cy="35" rx="5.5" ry="6" fill="white"/>
+                    <ellipse cx="32" cy="35.5" rx="3.8" ry="4.2" fill="#2898d8"/>
+                    <circle cx="32" cy="36" r="2.2" fill="#082840"/>
+                    <circle cx="33.8" cy="33.5" r="1.5" fill="white"/>
+                    <circle cx="31" cy="35" r="0.8" fill="white" opacity="0.7"/>
+                    {/* 右眼 */}
+                    <ellipse cx="48" cy="35" rx="5.5" ry="6" fill="white"/>
+                    <ellipse cx="48" cy="35.5" rx="3.8" ry="4.2" fill="#2898d8"/>
+                    <circle cx="48" cy="36" r="2.2" fill="#082840"/>
+                    <circle cx="49.8" cy="33.5" r="1.5" fill="white"/>
+                    <circle cx="47" cy="35" r="0.8" fill="white" opacity="0.7"/>
+                    {/* 睫毛左 */}
+                    <path d="M 26.5 31 Q 32 26 37.5 31" stroke="#082840" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+                    <line x1="27.5" y1="31.5" x2="25" y2="26" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    <line x1="32" y1="29" x2="32" y2="24" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    <line x1="36.5" y1="31" x2="38.5" y2="26.5" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    {/* 睫毛右 */}
+                    <path d="M 42.5 31 Q 48 26 53.5 31" stroke="#082840" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+                    <line x1="43.5" y1="31.5" x2="41.5" y2="26.5" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    <line x1="48" y1="29" x2="48" y2="24" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    <line x1="52.5" y1="31" x2="55" y2="26" stroke="#082840" strokeWidth="1.1" strokeLinecap="round"/>
+                    {/* 眉毛 */}
+                    <path d="M 26 28 Q 32 24 38 27" stroke="#8898b8" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+                    <path d="M 42 27 Q 48 24 54 28" stroke="#8898b8" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+                    {/* 鼻子 */}
+                    <circle cx="40" cy="43" r="1.1" fill="#e0a898" opacity="0.6"/>
+                    {/* 腮红 */}
+                    <ellipse cx="26" cy="44" rx="7" ry="4" fill="#ffb8d0" opacity="0.35"/>
+                    <ellipse cx="54" cy="44" rx="7" ry="4" fill="#ffb8d0" opacity="0.35"/>
+                    {/* 嘴 */}
+                    <path d="M 33 51 Q 40 57 47 51" stroke="#e06878" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+                    <path d="M 33 51 Q 36.5 54.5 40 53.5 Q 43.5 54.5 47 51" fill="#f09898"/>
+                    {/* 冰晶皇冠 */}
+                    <path d="M 24 18 L 29 8 L 34 16 L 40 6 L 46 16 L 51 8 L 56 18" stroke="#a8e0ff" strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+                    <line x1="23" y1="18" x2="57" y2="18" stroke="#a8e0ff" strokeWidth="1.5"/>
+                    <circle cx="29" cy="8" r="1.5" fill="#d8f4ff"/>
+                    <circle cx="40" cy="6" r="2" fill="#d8f4ff"/>
+                    <circle cx="51" cy="8" r="1.5" fill="#d8f4ff"/>
+                    <circle cx="40" cy="6" r="2.2" fill="#80d8ff" opacity="0.9"/>
+                    {/* 冰蓝礼服 */}
+                    <path d="M 0 64 Q 18 52 40 54 Q 62 52 80 64 L 80 80 L 0 80Z" fill="#58b8e8"/>
+                    <path d="M 0 71 Q 20 62 40 63 Q 60 62 80 71 L 80 80 L 0 80Z" fill="#3888c8"/>
+                    <path d="M 12 62 Q 40 56 68 62" stroke="#a8e8ff" strokeWidth="1" fill="none" opacity="0.65"/>
+                    {/* 侧发 */}
+                    <path d="M 16 28 Q 11 48 13 62" stroke="#c8d8f8" strokeWidth="11" fill="none" strokeLinecap="round" opacity="0.85"/>
+                    <path d="M 64 28 Q 69 48 67 62" stroke="#c8d8f8" strokeWidth="11" fill="none" strokeLinecap="round" opacity="0.85"/>
+                    <path d="M 16 28 Q 11 48 13 62" stroke="#9898c8" strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.3"/>
+                    <path d="M 64 28 Q 69 48 67 62" stroke="#9898c8" strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.3"/>
+                    {/* 雪花装饰 */}
+                    <g opacity="0.7" fill="none" stroke="#c8ecff" strokeWidth="1">
+                      <line x1="6" y1="10" x2="6" y2="18"/>
+                      <line x1="2" y1="14" x2="10" y2="14"/>
+                      <line x1="3" y1="11" x2="9" y2="17"/>
+                      <line x1="9" y1="11" x2="3" y2="17"/>
+                    </g>
+                    <g opacity="0.6" fill="none" stroke="#c8ecff" strokeWidth="0.8">
+                      <line x1="72" y1="8" x2="72" y2="14"/>
+                      <line x1="69" y1="11" x2="75" y2="11"/>
+                      <line x1="70" y1="9" x2="74" y2="13"/>
+                      <line x1="74" y1="9" x2="70" y2="13"/>
+                    </g>
+                  </svg>
                 </div>
-                <div className="bg-error text-white px-3 md:px-6 py-1 rounded-full font-headline font-black text-sm md:text-2xl shadow-lg border border-white/20">
+                <div className="bg-blue-500 text-white px-3 md:px-6 py-1 rounded-full font-headline font-black text-sm md:text-2xl shadow-lg border border-white/20">
                   {scoreLeft}
                 </div>
-                <span className="text-white font-black text-[8px] md:text-[10px] tracking-widest uppercase opacity-70">P1</span>
+                <span className="text-white font-black text-[8px] md:text-[10px] tracking-widest uppercase opacity-70">Elsa</span>
               </motion.div>
 
               {/* Melody Visualization */}
@@ -769,13 +961,77 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
                 transition={{ repeat: Infinity, duration: 1, delay: 0.5 }}
                 className="flex flex-col items-center gap-1 md:gap-3"
               >
-                <div className="w-12 h-12 md:w-20 md:h-20 rounded-full bg-secondary border-2 md:border-4 border-white shadow-2xl overflow-hidden">
-                  <img src="https://picsum.photos/seed/p2/100/100" className="w-full h-full object-cover" />
+                <div className="w-12 h-12 md:w-20 md:h-20 rounded-full border-2 md:border-4 border-white shadow-2xl overflow-hidden">
+                  <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+                    <defs>
+                      <radialGradient id="clownBg" cx="50%" cy="40%" r="65%">
+                        <stop offset="0%" stopColor="#fff8e0"/>
+                        <stop offset="100%" stopColor="#ffd060"/>
+                      </radialGradient>
+                    </defs>
+                    {/* 黄色背景 */}
+                    <rect width="80" height="80" fill="url(#clownBg)"/>
+                    {/* 左侧红色爆炸头 */}
+                    <circle cx="10" cy="32" r="13" fill="#ff3030"/>
+                    <circle cx="6" cy="22" r="9" fill="#ff3030"/>
+                    <circle cx="14" cy="18" r="10" fill="#ff3030"/>
+                    {/* 右侧红色爆炸头 */}
+                    <circle cx="70" cy="32" r="13" fill="#ff3030"/>
+                    <circle cx="74" cy="22" r="9" fill="#ff3030"/>
+                    <circle cx="66" cy="18" r="10" fill="#ff3030"/>
+                    {/* 顶部小爆炸 */}
+                    <circle cx="40" cy="8" r="8" fill="#ff3030"/>
+                    <circle cx="30" cy="10" r="7" fill="#ff3030"/>
+                    <circle cx="50" cy="10" r="7" fill="#ff3030"/>
+                    {/* 白色脸 */}
+                    <ellipse cx="40" cy="42" rx="24" ry="26" fill="white"/>
+                    {/* 左眼彩妆（蓝色星形） */}
+                    <ellipse cx="29" cy="36" rx="8" ry="8" fill="#60c8ff" opacity="0.5"/>
+                    <ellipse cx="29" cy="36" rx="5.5" ry="6" fill="white"/>
+                    <ellipse cx="29" cy="36.5" rx="3.5" ry="4" fill="#1860c8"/>
+                    <circle cx="29" cy="37" r="2" fill="#081830"/>
+                    <circle cx="30.5" cy="34.8" r="1.3" fill="white"/>
+                    {/* 右眼彩妆（绿色星形） */}
+                    <ellipse cx="51" cy="36" rx="8" ry="8" fill="#60e870" opacity="0.5"/>
+                    <ellipse cx="51" cy="36" rx="5.5" ry="6" fill="white"/>
+                    <ellipse cx="51" cy="36.5" rx="3.5" ry="4" fill="#186018"/>
+                    <circle cx="51" cy="37" r="2" fill="#081808"/>
+                    <circle cx="52.5" cy="34.8" r="1.3" fill="white"/>
+                    {/* 眉毛（夸张上扬） */}
+                    <path d="M 21 28 Q 29 20 37 27" stroke="#181818" strokeWidth="2" fill="none" strokeLinecap="round"/>
+                    <path d="M 43 27 Q 51 20 59 28" stroke="#181818" strokeWidth="2" fill="none" strokeLinecap="round"/>
+                    {/* 红鼻子（超大） */}
+                    <circle cx="40" cy="46" r="7" fill="#ff1818"/>
+                    <circle cx="38" cy="44" r="2" fill="#ff8888" opacity="0.6"/>
+                    {/* 腮红（橙色） */}
+                    <ellipse cx="22" cy="47" rx="8" ry="5" fill="#ff8840" opacity="0.5"/>
+                    <ellipse cx="58" cy="47" rx="8" ry="5" fill="#ff8840" opacity="0.5"/>
+                    {/* 大嘴（夸张笑） */}
+                    <path d="M 22 54 Q 40 70 58 54" stroke="#e01818" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+                    <path d="M 22 54 Q 31 63 40 64 Q 49 63 58 54 Q 49 60 40 61 Q 31 60 22 54Z" fill="#e84848"/>
+                    {/* 牙齿 */}
+                    <rect x="30" y="57" width="8" height="5" rx="1" fill="white"/>
+                    <rect x="40" y="57" width="8" height="5" rx="1" fill="white"/>
+                    {/* 彩色蝴蝶结领 */}
+                    <path d="M 0 68 Q 18 58 40 60 Q 62 58 80 68 L 80 80 L 0 80Z" fill="#e01880"/>
+                    <circle cx="14" cy="64" r="4" fill="#ffee00"/>
+                    <circle cx="26" cy="62" r="3" fill="#00c8ff"/>
+                    <circle cx="40" cy="61" r="4" fill="#ffee00"/>
+                    <circle cx="54" cy="62" r="3" fill="#00c8ff"/>
+                    <circle cx="66" cy="64" r="4" fill="#ffee00"/>
+                    {/* 帽子尖顶 */}
+                    <path d="M 28 16 L 40 1 L 52 16Z" fill="#9020e0"/>
+                    <path d="M 27 17 L 53 17" stroke="#9020e0" strokeWidth="3" strokeLinecap="round"/>
+                    <circle cx="40" cy="1" r="2.5" fill="#ffee00"/>
+                    {/* 帽子彩色条纹 */}
+                    <line x1="34" y1="16" x2="40" y2="4" stroke="#ffee00" strokeWidth="1.5" opacity="0.6"/>
+                    <line x1="46" y1="16" x2="40" y2="4" stroke="#ff88cc" strokeWidth="1.5" opacity="0.6"/>
+                  </svg>
                 </div>
-                <div className="bg-secondary text-white px-3 md:px-6 py-1 rounded-full font-headline font-black text-sm md:text-2xl shadow-lg border border-white/20">
+                <div className="bg-purple-600 text-white px-3 md:px-6 py-1 rounded-full font-headline font-black text-sm md:text-2xl shadow-lg border border-white/20">
                   {scoreRight}
                 </div>
-                <span className="text-white font-black text-[8px] md:text-[10px] tracking-widest uppercase opacity-70">P2</span>
+                <span className="text-white font-black text-[8px] md:text-[10px] tracking-widest uppercase opacity-70">小丑</span>
               </motion.div>
             </>
           ) : (
@@ -792,7 +1048,7 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
         </div>
 
         {/* Conductor Beethoven - Center */}
-        <div className="relative flex flex-col items-center mt-4">
+        <div className="relative flex flex-col items-center flex-shrink-0">
           <motion.div
             animate={isPlaying ? { 
               y: [0, -5, 0],
@@ -870,11 +1126,11 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
           </div>
         </div>
 
-        {/* Lyrics Area - Bottom of main */}
-        <div className="text-center max-w-4xl w-full px-4 h-[180px] md:h-[220px] relative overflow-hidden flex flex-col items-center mt-2">
+        {/* Lyrics Area - fills remaining space */}
+        <div className="text-center max-w-4xl w-full px-4 flex-1 min-h-0 relative overflow-hidden flex flex-col items-center justify-center">
           {/* Gradient Masks */}
-          <div className="absolute top-0 left-0 w-full h-12 md:h-16 bg-gradient-to-b from-[#0a041a] to-transparent z-10 pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-full h-12 md:h-16 bg-gradient-to-t from-[#1a0b2e] to-transparent z-10 pointer-events-none" />
+          <div className="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-[#0a041a] to-transparent z-10 pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-full h-8 bg-gradient-to-t from-[#1a0b2e] to-transparent z-10 pointer-events-none" />
 
           {/* Pop-out Educational Elements */}
           <AnimatePresence>
@@ -893,11 +1149,12 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
           </AnimatePresence>
 
           {isPkActive ? (
-            <div className="relative w-full h-full flex items-center justify-center">
-              <motion.div 
+            <div className="relative w-full h-full overflow-hidden">
+              <motion.div
                 animate={{ y: -currentLyricIndex * 100 }}
                 transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                className="flex flex-col items-center absolute"
+                className="flex flex-col items-center absolute left-0 w-full"
+                style={{ top: 'calc(50% - 50px)' }}
               >
                 {song.content.lyrics.map((lyric, index) => {
                   const isActive = index === currentLyricIndex;
@@ -968,7 +1225,7 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
           )}
         </div>
         
-        <p className="font-body text-lg md:text-2xl text-purple-200/40 tracking-widest font-bold uppercase -mt-4 md:-mt-8">
+        <p className="font-body text-lg md:text-2xl text-purple-200/40 tracking-widest font-bold uppercase">
           {song.chineseTitle}
         </p>
       </main>
@@ -976,10 +1233,9 @@ function KaraokeScreen({ song, onBack }: { song: SongNode, onBack: () => void })
       {/* Controls */}
       <footer className="relative z-50 px-6 md:px-20 pb-6 md:pb-8 pt-2 md:pt-4 flex flex-col items-center gap-2 md:gap-4">
         <div className="w-full max-w-4xl h-2 md:h-3 bg-white/10 rounded-full overflow-hidden">
-          <motion.div 
-            animate={{ width: isPlaying ? '100%' : '0%' }}
-            transition={{ duration: isPlaying ? 12 : 0, ease: "linear" }}
-            className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500"
+          <div
+            className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 transition-[width] duration-100 ease-linear"
+            style={{ width: `${totalProgress}%` }}
           />
         </div>
         <div className="flex items-center gap-4 md:gap-8">
@@ -1073,7 +1329,7 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
     >
       {/* Header */}
       <div className="absolute top-8 left-8 z-50 flex items-center gap-6">
-        <HomeButton onClick={handleBack} />
+        <HomeButton onClick={() => onNavigate('MAP')} />
         <button 
           onClick={toggleLanguage}
           className="bg-white/10 backdrop-blur-md text-white px-8 py-4 rounded-full flex items-center justify-center active:scale-95 transition-all border border-white/20 font-black text-xl shadow-lg"
@@ -1308,7 +1564,7 @@ function PlayScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
       style={{ background: 'radial-gradient(circle at top, #001e2b 0%, #00394e 100%)' }}
     >
       <div className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-8 py-8">
-        <HomeButton onClick={handleBack} />
+        <HomeButton onClick={() => onNavigate('MAP')} />
         <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
           <h1 className="font-headline text-5xl font-black text-white tracking-widest drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">玩一玩</h1>
         </div>

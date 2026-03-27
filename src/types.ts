@@ -44,39 +44,32 @@ export const SONGS: SongNode[] = [
       ],
       storyPages: [
         {
-          text: "Once upon a time, a little boy named Leo looked out of his window.",
-          chineseText: "从前，有一个叫里奥的小男孩正看着窗外。",
-          imageSeed: "boy-window-star",
+          text: "Look! A little star is winking at Leo!",
+          chineseText: "你看！一颗小星星在对里奥眨眼睛！",
+          imageSeed: "boy-grass-night-sky",
           highlight: "Star",
           nurseryRhyme: "Twinkle, twinkle, little star,"
         },
         {
-          text: "He saw a bright star in the dark night sky. It looked like a diamond.",
-          chineseText: "他在漆黑的夜空中看到一颗明亮的星星。它看起来像一颗钻石。",
-          imageSeed: "bright-star-diamond",
-          highlight: "Diamond",
+          text: "What are you, little star? Leo wants to know!",
+          chineseText: "你是什么呀，小星星？里奥好想知道！",
+          imageSeed: "boy-pointing-wonder-sky",
+          highlight: "Wonder",
           nurseryRhyme: "How I wonder what you are!"
         },
         {
-          text: "The star was so high above the world, shining over the sleepy town.",
-          chineseText: "星星高高挂在世界上方，照耀着沉睡的小镇。",
-          imageSeed: "star-over-town",
-          highlight: "World",
+          text: "The star lives way up high. Higher than the birds!",
+          chineseText: "星星住在好高好高的天上。比小鸟还要高！",
+          imageSeed: "star-above-clouds-mountain",
+          highlight: "High",
           nurseryRhyme: "Up above the world so high,"
         },
         {
-          text: "Leo made a wish. He wanted to fly to the sky and dance with the star.",
-          chineseText: "里奥许了个愿。他想飞上天空，和星星一起跳舞。",
-          imageSeed: "boy-flying-star",
-          highlight: "Sky",
+          text: "The star shines like a diamond. So bright and pretty!",
+          chineseText: "星星像钻石一样闪亮。好漂亮啊！",
+          imageSeed: "diamond-sparkle-night-sky",
+          highlight: "Diamond",
           nurseryRhyme: "Like a diamond in the sky."
-        },
-        {
-          text: "The little star twinkled back at him. It was a magical night.",
-          chineseText: "小星星也对他闪烁。这是一个神奇的夜晚。",
-          imageSeed: "star-twinkling-boy",
-          highlight: "Twinkle",
-          nurseryRhyme: "Twinkle, twinkle, little star."
         }
       ],
       game: {
