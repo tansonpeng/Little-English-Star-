@@ -30,6 +30,7 @@ import {
 import confetti from 'canvas-confetti';
 import { Screen, SONGS, SongNode } from './types';
 import { sfxService } from './services/sfxService';
+import { geminiImageService } from './services/geminiImageService';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('MAP');
@@ -52,7 +53,9 @@ export default function App() {
           setSongs(prev => prev.map(s => s.id === 'sheep' ? { ...s, locked: false } : s));
         }
         if (newProgress >= 100) {
-          setSongs(prev => prev.map(s => s.id === 'bus' ? { ...s, locked: false } : s));
+          setSongs(prev => prev.map(s =>
+            (s.id === 'bus' || s.id === 'boat') ? { ...s, locked: false } : s
+          ));
         }
         
         return newProgress;
@@ -88,16 +91,16 @@ export default function App() {
           />
         )}
         {currentScreen === 'LISTEN' && (
-          <ListenScreen 
-            song={selectedSong} 
-            onBack={() => navigateTo('HUB')} 
+          <ListenScreen
+            song={selectedSong}
+            onBack={() => navigateTo('HUB')}
             onNavigate={navigateTo}
           />
         )}
         {currentScreen === 'READ' && (
-          <ReadScreen 
-            song={selectedSong} 
-            onBack={() => navigateTo('HUB')} 
+          <ReadScreen
+            song={selectedSong}
+            onBack={() => navigateTo('HUB')}
             onNavigate={navigateTo}
           />
         )}
@@ -118,6 +121,19 @@ export default function App() {
       </AnimatePresence>
     </div>
   );
+}
+
+/** Parse an LRC file into timed lyric lines, ignoring metadata tags */
+function parseLRC(text: string): { time: number; lyric: string }[] {
+  const result: { time: number; lyric: string }[] = [];
+  for (const line of text.split('\n')) {
+    const m = /\[(\d{2}):(\d{2}\.\d{2,3})\](.+)/.exec(line);
+    if (!m) continue;
+    const time = parseInt(m[1]) * 60 + parseFloat(m[2]);
+    const lyric = m[3].trim();
+    if (lyric) result.push({ time, lyric });
+  }
+  return result;
 }
 
 function HomeButton({ onClick, className = "" }: { onClick: () => void, className?: string }) {
@@ -584,34 +600,100 @@ function HubButton({ icon, title, subtitle, color, onClick }: { icon: ReactNode,
 function ListenScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () => void, onNavigate: (s: Screen) => void }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentLyricIndex, setCurrentLyricIndex] = useState(0);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [lrcLines, setLrcLines] = useState<{ time: number; lyric: string }[]>([]);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  // Ref so the audio timeupdate closure always sees the latest LRC data
+  const lrcLinesRef = React.useRef<{ time: number; lyric: string }[]>([]);
 
+  // Keep ref in sync with state
+  useEffect(() => { lrcLinesRef.current = lrcLines; }, [lrcLines]);
+
+  // Fetch and parse LRC file when available
   useEffect(() => {
-    let interval: any;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentLyricIndex((prev) => (prev + 1) % song.content.lyrics.length);
-      }, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, song.content.lyrics.length]);
+    if (!song.lrcSrc) return;
+    fetch(song.lrcSrc)
+      .then(r => r.text())
+      .then(text => setLrcLines(parseLRC(text)))
+      .catch(() => {});
+  }, [song.lrcSrc]);
 
-  const handleBack = () => {
-    sfxService.playClick();
-    onBack();
-  };
+  // Setup audio element
+  useEffect(() => {
+    if (!song.audioSrc) return;
+    const audio = new Audio(song.audioSrc);
+    audioRef.current = audio;
+
+    const onTimeUpdate = () => {
+      if (!audio.duration) return;
+      const t = audio.currentTime;
+      setAudioProgress((t / audio.duration) * 100);
+
+      const lines = lrcLinesRef.current;
+      if (lines.length > 0) {
+        // LRC-based sync: find the last timestamp we've passed
+        let idx = 0;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (t >= lines[i].time) { idx = i; break; }
+        }
+        setCurrentLyricIndex(idx);
+      } else if (song.content.lyricTimestamps) {
+        // Fallback: hardcoded timestamps
+        const ts = song.content.lyricTimestamps;
+        let idx = 0;
+        for (let i = ts.length - 1; i >= 0; i--) {
+          if (t >= ts[i]) { idx = i; break; }
+        }
+        setCurrentLyricIndex(idx);
+      } else {
+        setCurrentLyricIndex(Math.min(
+          Math.floor((t / audio.duration) * song.content.lyrics.length),
+          song.content.lyrics.length - 1
+        ));
+      }
+    };
+    const onEnded = () => setIsPlaying(false);
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('ended', onEnded);
+    return () => {
+      audio.pause();
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, [song.audioSrc]);
+
+  // Fallback timer for songs without MP3
+  useEffect(() => {
+    if (song.audioSrc) return;
+    let interval: any;
+    if (isPlaying) interval = setInterval(() => {
+      setCurrentLyricIndex(p => (p + 1) % song.content.lyrics.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isPlaying, song.audioSrc, song.content.lyrics.length]);
 
   const handleTogglePlay = () => {
     sfxService.playClick();
-    setIsPlaying(!isPlaying);
+    if (audioRef.current) {
+      isPlaying ? audioRef.current.pause() : audioRef.current.play().catch(() => {});
+    }
+    setIsPlaying(p => !p);
   };
 
-  const handleNavigate = (s: Screen) => {
-    sfxService.playClick();
-    onNavigate(s);
-  };
+  const handleNavigate = (s: Screen) => { sfxService.playClick(); onNavigate(s); };
+
+  // Active lyrics: prefer LRC data; fall back to types.ts
+  const activeLyrics = lrcLines.length > 0 ? lrcLines.map(l => l.lyric) : song.content.lyrics;
+
+  // Image: each lyric maps to a storyPage (2 lyrics per page)
+  const storyPageForLyric = song.content.storyPages[Math.floor(currentLyricIndex / 2)];
+  const coverImageUrl = storyPageForLyric?.imageUrl ?? null;
+
+  const progressWidth = song.audioSrc ? audioProgress : (isPlaying ? 100 : 33);
+  const progressDuration = song.audioSrc ? 0.1 : (isPlaying ? 12 : 0.5);
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -624,7 +706,7 @@ function ListenScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: ()
           <h2 className="font-headline text-5xl font-black text-white tracking-widest drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">听一听</h2>
         </div>
         <div className="flex gap-4">
-          <button 
+          <button
             onClick={() => onNavigate('KARAOKE')}
             className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-600 text-white rounded-2xl font-headline font-black text-xl shadow-[0_8px_0_#9d174d] active:translate-y-1 active:shadow-none transition-all hover:scale-105"
           >
@@ -638,31 +720,51 @@ function ListenScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: ()
         <div className="relative group">
           <div className="absolute inset-0 bg-primary-container rounded-full blur-[80px] opacity-20 scale-125"></div>
           <div className="relative w-72 h-72 flex items-center justify-center">
-            <motion.div
-              animate={isPlaying ? { rotate: 360 } : {}}
-              transition={{ repeat: Infinity, duration: 10, ease: "linear" }}
-            >
-              <Star size={280} className="text-primary-container star-glow" fill="currentColor" />
-            </motion.div>
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 mt-8">
-              <div className="flex gap-10">
-                <div className="w-5 h-5 bg-on-primary-container rounded-full"></div>
-                <div className="w-5 h-5 bg-on-primary-container rounded-full"></div>
-              </div>
-              <div className="w-12 h-6 border-b-8 border-on-primary-container rounded-full"></div>
-            </div>
+            {coverImageUrl ? (
+              // Songs with local illustrations: show the matching image
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={Math.floor(currentLyricIndex / 2)}
+                  initial={{ opacity: 0, scale: 1.05 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.5 }}
+                  className="w-72 h-72 rounded-full overflow-hidden border-4 border-white/30 shadow-2xl"
+                >
+                  <img src={coverImageUrl} alt="Song illustration" className="w-full h-full object-cover" />
+                </motion.div>
+              </AnimatePresence>
+            ) : (
+              // Other songs: original spinning star
+              <>
+                <motion.div
+                  animate={isPlaying ? { rotate: 360 } : {}}
+                  transition={{ repeat: Infinity, duration: 10, ease: "linear" }}
+                >
+                  <Star size={280} className="text-primary-container star-glow" fill="currentColor" />
+                </motion.div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 mt-8">
+                  <div className="flex gap-10">
+                    <div className="w-5 h-5 bg-on-primary-container rounded-full"></div>
+                    <div className="w-5 h-5 bg-on-primary-container rounded-full"></div>
+                  </div>
+                  <div className="w-12 h-6 border-b-8 border-on-primary-container rounded-full"></div>
+                </div>
+              </>
+            )}
           </div>
         </div>
+
         <div className="mt-16 text-center max-w-4xl">
           <AnimatePresence mode="wait">
-            <motion.h1 
+            <motion.h1
               key={currentLyricIndex}
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -20, opacity: 0 }}
               className="font-headline text-6xl font-black text-white leading-tight"
             >
-              {song.content.lyrics[currentLyricIndex]}
+              {activeLyrics[currentLyricIndex] ?? ''}
             </motion.h1>
           </AnimatePresence>
           <p className="font-body text-2xl text-secondary-fixed/60 mt-4 tracking-wide font-semibold">
@@ -673,16 +775,16 @@ function ListenScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: ()
 
       <footer className="relative z-50 px-20 pb-16 pt-8">
         <div className="relative h-6 w-full bg-white/10 rounded-full mb-12 overflow-hidden">
-          <motion.div 
-            animate={{ width: isPlaying ? '100%' : '33%' }}
-            transition={{ duration: isPlaying ? 12 : 0.5, ease: "linear" }}
+          <motion.div
+            animate={{ width: `${progressWidth}%` }}
+            transition={{ duration: progressDuration, ease: "linear" }}
             className="absolute top-0 left-0 h-full bg-gradient-to-r from-primary-fixed via-white to-secondary-container rounded-full flex items-center justify-end px-1"
           >
             <div className="w-4 h-4 bg-white rounded-full shadow-[0_0_15px_#fff]"></div>
           </motion.div>
         </div>
         <div className="flex items-center justify-center">
-          <button 
+          <button
             onClick={handleTogglePlay}
             className="w-32 h-32 bg-primary-container text-on-primary-container rounded-full flex items-center justify-center shadow-[0_12px_0_#604700] transition-all active:translate-y-2 active:shadow-none"
           >
@@ -1276,6 +1378,63 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
   const [isEnglish, setIsEnglish] = useState(true);
   const pages = song.content.storyPages;
   const page = pages[currentPage];
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [lrcLines, setLrcLines] = useState<{ time: number; lyric: string }[]>([]);
+  const lrcLinesRef = React.useRef<{ time: number; lyric: string }[]>([]);
+  useEffect(() => { lrcLinesRef.current = lrcLines; }, [lrcLines]);
+
+  // Fetch and parse LRC file
+  useEffect(() => {
+    if (!song.lrcSrc) return;
+    fetch(song.lrcSrc)
+      .then(r => r.text())
+      .then(text => setLrcLines(parseLRC(text)))
+      .catch(() => {});
+  }, [song.lrcSrc]);
+
+  // Setup audio element
+  useEffect(() => {
+    if (!song.audioSrc) return;
+    audioRef.current = new Audio(song.audioSrc);
+    return () => { audioRef.current?.pause(); };
+  }, [song.audioSrc]);
+
+  // Auto-play the corresponding audio segment when page or LRC data changes
+  useEffect(() => {
+    if (!song.audioSrc || !audioRef.current) return;
+    const audio = audioRef.current;
+
+    const playSegment = () => {
+      const lines = lrcLinesRef.current;
+      let startTime: number;
+      let endTime: number;
+
+      if (lines.length > 0) {
+        // LRC-based: each story page covers 2 lyric lines
+        const lyricStart = currentPage * 2;
+        const lyricEnd   = lyricStart + 2;
+        startTime = lines[lyricStart]?.time ?? 0;
+        endTime   = lines[lyricEnd]?.time   ?? audio.duration;
+      } else {
+        // Fallback: divide evenly
+        startTime = (currentPage / pages.length) * audio.duration;
+        endTime   = ((currentPage + 1) / pages.length) * audio.duration;
+      }
+
+      audio.currentTime = startTime;
+      audio.play().catch(() => {});
+      const timer = setTimeout(() => audio.pause(), (endTime - startTime) * 1000);
+      return timer;
+    };
+
+    let timer: ReturnType<typeof setTimeout>;
+    if (audio.readyState >= 1) {
+      timer = playSegment();
+    } else {
+      audio.addEventListener('loadedmetadata', () => { timer = playSegment(); }, { once: true });
+    }
+    return () => { clearTimeout(timer); audio.pause(); };
+  }, [currentPage, song.audioSrc, lrcLines]);
 
   const handleBack = () => {
     sfxService.playClick();
@@ -1365,10 +1524,10 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
             <div className="relative group">
               <div className="absolute -inset-4 bg-gradient-to-tr from-primary/30 to-secondary/30 rounded-[4rem] blur-2xl opacity-50 group-hover:opacity-100 transition-opacity" />
               <div className="w-[500px] h-[500px] bg-white p-6 rounded-[4rem] shadow-2xl relative overflow-hidden transform hover:scale-[1.02] transition-transform duration-500">
-                <img 
-                  alt="Story illustration" 
-                  className="w-full h-full object-cover rounded-[3rem]" 
-                  src={`https://picsum.photos/seed/${page.imageSeed}/800/800`}
+                <img
+                  alt="Story illustration"
+                  className="w-full h-full object-cover rounded-[3rem]"
+                  src={page.imageUrl ?? `https://picsum.photos/seed/${page.imageSeed}/800/800`}
                   referrerPolicy="no-referrer"
                 />
                 {/* Opera Overlay (Nursery Rhyme Snippet) */}
@@ -1472,6 +1631,38 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
       <div className="fixed bottom-12 right-12 z-50">
         <ActivityNavButton type="PLAY" onClick={() => handleNavigate('PLAY')} />
       </div>
+
+      {/* LRC Debug Bar — bottom center, only when LRC is loaded */}
+      {lrcLines.length > 0 && (() => {
+        const lyricStart = currentPage * 2;
+        const startTime  = lrcLines[lyricStart]?.time ?? 0;
+        const endTime    = lrcLines[lyricStart + 2]?.time ?? null;
+        const fmt = (s: number) =>
+          `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(2).padStart(5, '0')}`;
+        return (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+            <div className="bg-black/80 backdrop-blur border border-yellow-400/50 rounded-2xl px-6 py-3 flex items-center gap-5 text-xs font-mono shadow-xl">
+              <span className="text-yellow-400 font-black uppercase tracking-widest">LRC</span>
+              <div className="flex flex-col gap-0.5 text-white/80">
+                {lrcLines[lyricStart] && (
+                  <span>[{fmt(lrcLines[lyricStart].time)}] {lrcLines[lyricStart].lyric}</span>
+                )}
+                {lrcLines[lyricStart + 1] && (
+                  <span>[{fmt(lrcLines[lyricStart + 1].time)}] {lrcLines[lyricStart + 1].lyric}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 border-l border-white/20 pl-4">
+                <span className="text-green-400 font-bold">▶ {fmt(startTime)}</span>
+                <span className="text-white/30">→</span>
+                <span className="text-red-400 font-bold">■ {endTime !== null ? fmt(endTime) : 'END'}</span>
+                {endTime !== null && (
+                  <span className="text-white/40">({(endTime - startTime).toFixed(2)}s)</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </motion.div>
   );
 }
