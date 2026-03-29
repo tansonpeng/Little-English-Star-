@@ -36,8 +36,8 @@ export const SONGS: SongNode[] = [
     id: 'twinkle',
     title: 'Twinkle Twinkle Little Star',
     chineseTitle: '一闪一闪亮晶晶',
-    locked: false,
-    position: { left: '5%', bottom: '15%' },
+    locked: true,
+    position: { left: '20%', bottom: '30%' },
     icon: 'star',
     content: {
       lyrics: [
@@ -90,7 +90,7 @@ export const SONGS: SongNode[] = [
     id: 'macdonald',
     title: 'Old MacDonald',
     chineseTitle: '王老先生有块地',
-    locked: false,
+    locked: true,
     position: { left: '38%', top: '15%' },
     icon: 'pets',
     content: {
@@ -187,7 +187,7 @@ export const SONGS: SongNode[] = [
     title: 'Row Row Row Your Boat',
     chineseTitle: '划划划你的船',
     locked: false,
-    position: { left: '20%', bottom: '30%' },
+    position: { left: '5%', bottom: '15%' },
     icon: 'boat',
     audioSrc: '/Little-English-Star-/audio/row-row-row-your-boat.mp3',
     lrcSrc: '/Little-English-Star-/audio/row-row-row-your-boat.lrc',

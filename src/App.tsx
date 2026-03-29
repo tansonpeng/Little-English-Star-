@@ -35,8 +35,14 @@ import { geminiImageService } from './services/geminiImageService';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('MAP');
-  const [songs, setSongs] = useState<SongNode[]>(SONGS);
-  const [selectedSongId, setSelectedSongId] = useState<string>(SONGS[0].id);
+  const [songs, setSongs] = useState<SongNode[]>(() => {
+    const learningOrder = ['boat', 'twinkle', 'macdonald', 'sheep', 'bus'];
+    const rank = new Map(learningOrder.map((id, index) => [id, index]));
+    return SONGS
+      .map(song => ({ ...song, locked: song.id !== 'boat' }))
+      .sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+  });
+  const [selectedSongId, setSelectedSongId] = useState<string>('boat');
   const [progress, setProgress] = useState(25);
 
   const selectedSong = songs.find(s => s.id === selectedSongId) || songs[0];
@@ -46,17 +52,18 @@ export default function App() {
       setProgress(p => {
         const newProgress = Math.min(100, p + e.detail);
         
-        // Unlock next song logic
+        // Unlock next song logic in learning order
         if (newProgress >= 50) {
-          setSongs(prev => prev.map(s => s.id === 'macdonald' ? { ...s, locked: false } : s));
+          setSongs(prev => prev.map(s => s.id === 'twinkle' ? { ...s, locked: false } : s));
         }
         if (newProgress >= 75) {
+          setSongs(prev => prev.map(s => s.id === 'macdonald' ? { ...s, locked: false } : s));
+        }
+        if (newProgress >= 90) {
           setSongs(prev => prev.map(s => s.id === 'sheep' ? { ...s, locked: false } : s));
         }
         if (newProgress >= 100) {
-          setSongs(prev => prev.map(s =>
-            (s.id === 'bus' || s.id === 'boat') ? { ...s, locked: false } : s
-          ));
+          setSongs(prev => prev.map(s => s.id === 'bus' ? { ...s, locked: false } : s));
         }
         
         return newProgress;
@@ -1925,7 +1932,7 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
 
 function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () => void, onNavigate: (s: Screen) => void }) {
   const [currentPage, setCurrentPage] = useState(0);
-  const [isEnglish, setIsEnglish] = useState(true);
+  const [showChinese, setShowChinese] = useState(false);
   const pages = song.content.storyPages;
   const page = pages[currentPage];
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
@@ -2231,9 +2238,9 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
     }
   };
 
-  const toggleLanguage = () => {
+  const toggleBilingual = () => {
     sfxService.playClick();
-    setIsEnglish(!isEnglish);
+    setShowChinese(prev => !prev);
   };
 
   const replayCurrentPage = () => {
@@ -2428,7 +2435,6 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
 
   // Helper to highlight the keyword in text
   const renderHighlightedText = (text: string, highlight: string) => {
-    if (!isEnglish) return text;
     const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
     return parts.map((part, i) => 
       part.toLowerCase() === highlight.toLowerCase() ? (
@@ -2451,16 +2457,21 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
       <div className="absolute top-8 left-8 z-50 flex items-center gap-6">
         <HomeButton onClick={() => onNavigate('MAP')} />
         <button 
-          onClick={toggleLanguage}
-          className="bg-white/10 backdrop-blur-md text-white px-8 py-4 rounded-full flex items-center justify-center active:scale-95 transition-all border border-white/20 font-black text-xl shadow-lg"
+          onClick={toggleBilingual}
+          aria-pressed={showChinese}
+          className={`backdrop-blur-md px-8 py-4 rounded-full flex items-center justify-center active:scale-95 transition-all border font-black text-xl shadow-lg ${
+            showChinese
+              ? 'bg-primary-container/35 text-primary-container border-primary-container/70 shadow-[0_0_18px_rgba(255,255,255,0.28)]'
+              : 'bg-white/10 text-white border-white/20'
+          }`}
         >
-          {isEnglish ? '中文' : 'English'}
+          {showChinese ? '双语：开' : '双语：关'}
         </button>
       </div>
       
       <div className="absolute top-8 left-0 right-0 flex justify-center items-center z-50">
         <h2 className="font-headline text-5xl font-black text-white tracking-widest drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
-          {isEnglish ? 'Read Along' : '读一读'}
+          {'Read Along'}
         </h2>
       </div>
 
@@ -2484,39 +2495,23 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
           >
             <div className="relative group">
               <div className="absolute -inset-4 bg-gradient-to-tr from-primary/30 to-secondary/30 rounded-[4rem] blur-2xl opacity-50 group-hover:opacity-100 transition-opacity" />
-              <div className="w-[500px] h-[500px] bg-white p-6 rounded-[4rem] shadow-2xl relative overflow-hidden transform hover:scale-[1.02] transition-transform duration-500">
-                <img
-                  alt="Story illustration"
-                  className="w-full h-full object-cover rounded-[3rem]"
-                  src={page.imageUrl ?? `https://picsum.photos/seed/${page.imageSeed}/800/800`}
-                  referrerPolicy="no-referrer"
-                />
-                {/* Opera Overlay (Nursery Rhyme Snippet) */}
-                {page.nurseryRhyme && (
-                  <motion.div 
-                    initial={{ y: 50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    className="absolute bottom-10 left-10 right-10 bg-black/60 backdrop-blur-md p-6 rounded-3xl border border-white/20"
-                  >
-                    <div className="flex items-center gap-4 text-primary-container mb-2">
-                      <Mic size={24} />
-                      <span className="text-sm font-black tracking-widest uppercase">Sing Along</span>
-                    </div>
-                    <p className="text-2xl font-black text-white italic leading-tight">
-                      ♪ {page.nurseryRhyme} ♪
-                    </p>
-                  </motion.div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        </AnimatePresence>
+	              <div className="w-[500px] h-[500px] bg-white p-6 rounded-[4rem] shadow-2xl relative overflow-hidden transform hover:scale-[1.02] transition-transform duration-500">
+	                <img
+	                  alt="Story illustration"
+	                  className="w-full h-full object-cover rounded-[3rem]"
+	                  src={page.imageUrl ?? `https://picsum.photos/seed/${page.imageSeed}/800/800`}
+	                  referrerPolicy="no-referrer"
+	                />
+	              </div>
+	            </div>
+	          </motion.div>
+	        </AnimatePresence>
 
         {/* Text Side */}
         <div className="flex flex-col gap-12">
           <AnimatePresence mode="wait">
             <motion.div 
-              key={currentPage + (isEnglish ? 'en' : 'zh')}
+              key={currentPage + (showChinese ? 'bilingual-on' : 'bilingual-off')}
               initial={{ y: 30, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -30, opacity: 0 }}
@@ -2526,27 +2521,23 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
                 <div className="flex items-center gap-4">
                   <div className="h-2 w-12 bg-primary-container rounded-full" />
                   <span className="text-primary-container font-black tracking-widest uppercase text-xl">
-                    {isEnglish ? 'The Story' : '故事内容'}
+                    {showChinese ? 'The Story · 故事内容' : 'The Story'}
                   </span>
                 </div>
                 
-                <h1 className="text-5xl font-black text-white leading-tight font-body">
-                  {renderHighlightedText(isEnglish ? page.text : page.chineseText, page.highlight)}
-                </h1>
+	                <div className="flex flex-col gap-4">
+	                  <h1 className="text-5xl font-black text-white leading-tight font-body">
+	                    {renderHighlightedText(page.text, page.highlight)}
+	                  </h1>
+	                  {showChinese && (
+	                    <p className="text-3xl font-bold text-white/85 leading-tight font-body">
+	                      {page.chineseText}
+	                    </p>
+	                  )}
+	                </div>
 
-                <div className="flex items-center gap-6 mt-4">
-                  <div className="px-8 py-4 bg-primary-container/20 rounded-2xl border border-primary-container/30">
-                    <span className="text-primary-container font-black text-3xl">
-                      {page.highlight}
-                    </span>
-                  </div>
-                  <p className="text-white/60 font-bold text-xl">
-                    {isEnglish ? 'Key Word' : '重点单词'}
-                  </p>
-                </div>
-
-                {/* Page Actions: replay, sing, save, playback */}
-                <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-4">
+	                {/* Page Actions: replay, sing, save, playback */}
+	                <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-4">
                   <button
                     onClick={replayCurrentPage}
                     className={`${kidButtonBase} bg-white/10 border-white/25 text-white hover:bg-white/20`}
@@ -2620,9 +2611,7 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
                 </div>
 
                 <div className="mt-2 text-sm text-white/70 font-semibold min-h-6">
-                  {readStatus || (isEnglish
-                    ? `Saved pages: ${recordedCount}/${pages.length}`
-                    : `已保存页数：${recordedCount}/${pages.length}`)}
+                  {readStatus || `Saved pages: ${recordedCount}/${pages.length}`}
                 </div>
               </div>
             </motion.div>
