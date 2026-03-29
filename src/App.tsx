@@ -25,7 +25,8 @@ import {
   CheckCircle2,
   Gamepad2,
   Mic,
-  Users
+  Users,
+  UserRound
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Screen, SONGS, SongNode } from './types';
@@ -134,6 +135,69 @@ function parseLRC(text: string): { time: number; lyric: string }[] {
     if (lyric) result.push({ time, lyric });
   }
   return result;
+}
+
+function karaokeClamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeKaraokeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/** High-tolerance lyric matching for children's pronunciation */
+function computeLyricMatchScore(expected: string, heard: string): number {
+  const expectedNorm = normalizeKaraokeText(expected);
+  const heardNorm = normalizeKaraokeText(heard);
+  if (!expectedNorm || !heardNorm) return 0;
+
+  const expectedTokens = expectedNorm.split(' ').filter(Boolean);
+  const heardTokens = heardNorm.split(' ').filter(Boolean);
+  if (expectedTokens.length === 0 || heardTokens.length === 0) return 0;
+
+  let tokenMatches = 0;
+  for (const token of expectedTokens) {
+    const matched = heardTokens.some((h) =>
+      h === token ||
+      (token.length >= 3 && h.includes(token)) ||
+      (h.length >= 3 && token.includes(h)),
+    );
+    if (matched) tokenMatches += 1;
+  }
+
+  const coverage = tokenMatches / expectedTokens.length;
+  const editRatio = 1 - levenshteinDistance(expectedNorm, heardNorm) / Math.max(expectedNorm.length, heardNorm.length, 1);
+  let score = coverage * 0.7 + karaokeClamp(editRatio, 0, 1) * 0.3;
+
+  // Child-friendly tolerance floors
+  if (coverage >= 0.3) score = Math.max(score, 0.58);
+  if (coverage >= 0.5) score = Math.max(score, 0.74);
+  if (coverage >= 0.7) score = Math.max(score, 0.86);
+
+  return karaokeClamp(score, 0, 1);
 }
 
 function HomeButton({ onClick, className = "" }: { onClick: () => void, className?: string }) {
@@ -822,6 +886,28 @@ const LYRIC_ELEMENTS: Record<string, string[]> = {
 };
 
 function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () => void, onNavigate: (s: Screen) => void }) {
+  type SpeechRecognitionLike = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onresult: ((event: any) => void) | null;
+    onerror: ((event: any) => void) | null;
+    onend: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+  };
+
+  type SegmentStats = {
+    samples: number;
+    activeSamples: number;
+    firstActiveTime: number | null;
+    transcript: string;
+  };
+
+  type MicStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unsupported';
+  type ScoringMode = 'recognition' | 'rhythm';
+
+  const isBoatKaraoke = song.id === 'boat' && Boolean(song.audioSrc);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentLyricIndex, setCurrentLyricIndex] = useState(0);
   const [scoreLeft, setScoreLeft] = useState(0);
@@ -830,76 +916,540 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
   const [melodyBars, setMelodyBars] = useState<number[]>(Array(20).fill(20));
   const [isPkActive, setIsPkActive] = useState(false);
   const [popOutElements, setPopOutElements] = useState<{id: string, emoji: string, x: number, y: number}[]>([]);
+  const [lrcLines, setLrcLines] = useState<{ time: number; lyric: string }[]>([]);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [micStatus, setMicStatus] = useState<MicStatus>('idle');
+  const [scoringMode, setScoringMode] = useState<ScoringMode>('rhythm');
+  const [segmentWindow, setSegmentWindow] = useState<{ start: number; end: number }>({ start: 0, end: 5 });
+
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const lrcLinesRef = React.useRef<{ time: number; lyric: string }[]>([]);
+  const currentLyricIndexRef = React.useRef(0);
+  const currentTimeRef = React.useRef(0);
+  const isPlayingRef = React.useRef(false);
+  const activeLyricsRef = React.useRef<string[]>(song.content.lyrics);
+  const previousLyricIndexRef = React.useRef(0);
+  const scoredLineRef = React.useRef<Record<number, boolean>>({});
+  const segmentStatsRef = React.useRef<SegmentStats>({
+    samples: 0,
+    activeSamples: 0,
+    firstActiveTime: null,
+    transcript: '',
+  });
+  const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
+  const recognitionShouldRunRef = React.useRef(false);
+  const recognitionRunningRef = React.useRef(false);
+  const mediaStreamRef = React.useRef<MediaStream | null>(null);
+  const audioContextRef = React.useRef<AudioContext | null>(null);
+  const analyserRef = React.useRef<AnalyserNode | null>(null);
+  const analyserBufferRef = React.useRef<Uint8Array | null>(null);
+  const meterRafRef = React.useRef<number | null>(null);
+  const finalizeLineScoreRef = React.useRef<(lineIndex: number) => void>(() => {});
+  const getSegmentBoundsRef = React.useRef<(lineIndex: number) => { start: number; end: number }>(() => ({ start: 0, end: 5 }));
+
+  const activeLyrics = isBoatKaraoke && lrcLines.length > 0
+    ? lrcLines.map(l => l.lyric)
+    : song.content.lyrics;
 
   useEffect(() => {
-    if (isPlaying) {
-      const currentLyric = song.content.lyrics[currentLyricIndex].toLowerCase();
-      const elements: {id: string, emoji: string, x: number, y: number}[] = [];
-      
-      Object.entries(LYRIC_ELEMENTS).forEach(([keyword, emojis]) => {
-        if (currentLyric.includes(keyword)) {
-          emojis.forEach((emoji, i) => {
-            elements.push({
-              id: `${Date.now()}-${keyword}-${i}-${Math.random()}`,
-              emoji,
-              x: (Math.random() - 0.5) * 400,
-              y: (Math.random() - 0.5) * 200 - 150
-            });
-          });
-        }
-      });
-      
-      if (elements.length > 0) {
-        setPopOutElements(elements);
-        const timer = setTimeout(() => setPopOutElements([]), 3000);
-        return () => clearTimeout(timer);
-      }
+    lrcLinesRef.current = lrcLines;
+  }, [lrcLines]);
+
+  useEffect(() => {
+    activeLyricsRef.current = activeLyrics;
+    if (activeLyrics.length === 0) {
+      setCurrentLyricIndex(0);
+      return;
     }
-  }, [currentLyricIndex, isPlaying, song.content.lyrics]);
+    setCurrentLyricIndex(prev => Math.min(prev, activeLyrics.length - 1));
+  }, [activeLyrics]);
 
   useEffect(() => {
+    currentLyricIndexRef.current = currentLyricIndex;
+  }, [currentLyricIndex]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  getSegmentBoundsRef.current = (lineIndex: number) => {
+    const lyrics = activeLyricsRef.current;
+    if (lyrics.length === 0) return { start: 0, end: 5 };
+
+    const audio = audioRef.current;
+    const duration = audio && Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : lyrics.length * 4;
+
+    if (isBoatKaraoke && lrcLinesRef.current.length > 0) {
+      const lines = lrcLinesRef.current;
+      const start = lines[lineIndex]?.time ?? (lineIndex / lyrics.length) * duration;
+      const nextLineTime = lines[lineIndex + 1]?.time;
+      const end = nextLineTime ?? ((lineIndex + 1) / lyrics.length) * duration;
+      return end > start ? { start, end } : { start, end: start + 3 };
+    }
+
+    const seg = duration / Math.max(1, lyrics.length);
+    return { start: lineIndex * seg, end: (lineIndex + 1) * seg };
+  };
+
+  const resetSegmentStats = () => {
+    segmentStatsRef.current = {
+      samples: 0,
+      activeSamples: 0,
+      firstActiveTime: null,
+      transcript: '',
+    };
+  };
+
+  const stopRecognition = () => {
+    recognitionShouldRunRef.current = false;
+    if (!recognitionRef.current) return;
+    try {
+      recognitionRef.current.stop();
+    } catch (_) {}
+    recognitionRunningRef.current = false;
+  };
+
+  const stopMicPipeline = () => {
+    stopRecognition();
+    if (meterRafRef.current != null) {
+      cancelAnimationFrame(meterRafRef.current);
+      meterRafRef.current = null;
+    }
+    if (analyserRef.current) {
+      try { analyserRef.current.disconnect(); } catch (_) {}
+      analyserRef.current = null;
+    }
+    analyserBufferRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const pushLineScore = (lineIndex: number, score: number) => {
+    if (!isPkActive || score <= 0) return;
+    scoredLineRef.current[lineIndex] = true;
+    setScoreLeft(prev => {
+      const next = prev + score;
+      setScoreRight(prevRight => {
+        const targetFactor = 0.78 + ((lineIndex * 17) % 14) / 100;
+        const target = Math.round(next * targetFactor);
+        if (target <= prevRight) return prevRight + 2;
+        const step = Math.max(6, Math.round((target - prevRight) * 0.35));
+        return prevRight + step;
+      });
+      return next;
+    });
+  };
+
+  finalizeLineScoreRef.current = (lineIndex: number) => {
+    if (!isBoatKaraoke || !isPkActive) return;
+    const lyrics = activeLyricsRef.current;
+    if (lineIndex < 0 || lineIndex >= lyrics.length) return;
+    if (scoredLineRef.current[lineIndex]) return;
+
+    const bounds = getSegmentBoundsRef.current(lineIndex);
+    const stats = segmentStatsRef.current;
+    const expected = lyrics[lineIndex] ?? '';
+
+    const participationRaw = stats.samples > 0 ? stats.activeSamples / stats.samples : 0;
+    const participation = karaokeClamp(participationRaw * 1.8, 0.25, 1);
+
+    const startOffset = stats.firstActiveTime == null
+      ? Number.POSITIVE_INFINITY
+      : Math.abs(stats.firstActiveTime - bounds.start);
+    const timingDenominator = Math.max(0.8, (bounds.end - bounds.start) * 1.2);
+    const timing = Number.isFinite(startOffset)
+      ? karaokeClamp(1 - startOffset / timingDenominator, 0.35, 1)
+      : 0.35;
+
+    const textScore = scoringMode === 'recognition'
+      ? computeLyricMatchScore(expected, stats.transcript)
+      : 0;
+
+    const raw = scoringMode === 'recognition'
+      ? (textScore * 0.45 + timing * 0.35 + participation * 0.2)
+      : (timing * 0.65 + participation * 0.35);
+
+    pushLineScore(lineIndex, Math.round(karaokeClamp(raw, 0, 1) * 100));
+  };
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const currentLyric = (activeLyrics[currentLyricIndex] ?? '').toLowerCase();
+    if (!currentLyric) return;
+    const elements: {id: string, emoji: string, x: number, y: number}[] = [];
+
+    Object.entries(LYRIC_ELEMENTS).forEach(([keyword, emojis]) => {
+      if (currentLyric.includes(keyword)) {
+        emojis.forEach((emoji, i) => {
+          elements.push({
+            id: `${Date.now()}-${keyword}-${i}-${Math.random()}`,
+            emoji,
+            x: (Math.random() - 0.5) * 400,
+            y: (Math.random() - 0.5) * 200 - 150
+          });
+        });
+      }
+    });
+
+    if (elements.length > 0) {
+      setPopOutElements(elements);
+      const timer = setTimeout(() => setPopOutElements([]), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeLyrics, currentLyricIndex, isPlaying]);
+
+  useEffect(() => {
+    let melodyInterval: any;
+    if (isPlaying) {
+      melodyInterval = setInterval(() => {
+        setMelodyBars(bars => bars.map(() => Math.floor(Math.random() * 60) + 20));
+      }, 150);
+    }
+    return () => clearInterval(melodyInterval);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (isBoatKaraoke) return;
     let interval: any;
     let progressInterval: any;
-    let melodyInterval: any;
 
     if (isPlaying) {
-      // Lyrics change every 5 seconds for Karaoke (child-friendly pace)
       interval = setInterval(() => {
-        setCurrentLyricIndex((prev) => (prev + 1) % song.content.lyrics.length);
+        setCurrentLyricIndex((prev) => (prev + 1) % Math.max(1, activeLyrics.length));
         setLyricProgress(0);
-        // Simulate scoring only if PK is active
         if (isPkActive) {
           setScoreLeft(s => s + Math.floor(Math.random() * 100));
           setScoreRight(s => s + Math.floor(Math.random() * 100));
         }
       }, 5000);
 
-      // Smooth progress for lyrics filling (50ms * 100 = 5000ms)
       progressInterval = setInterval(() => {
         setLyricProgress(p => Math.min(100, p + 1));
       }, 50);
-
-      // Melody visualization
-      melodyInterval = setInterval(() => {
-        setMelodyBars(bars => bars.map(() => Math.floor(Math.random() * 60) + 20));
-      }, 150);
     }
 
     return () => {
       clearInterval(interval);
       clearInterval(progressInterval);
-      clearInterval(melodyInterval);
     };
-  }, [isPlaying, song.content.lyrics.length]);
+  }, [activeLyrics.length, isBoatKaraoke, isPkActive, isPlaying]);
+
+  useEffect(() => {
+    if (!isBoatKaraoke || !song.lrcSrc) {
+      setLrcLines([]);
+      return;
+    }
+    fetch(song.lrcSrc)
+      .then(r => r.text())
+      .then(text => setLrcLines(parseLRC(text)))
+      .catch(() => setLrcLines([]));
+  }, [isBoatKaraoke, song.lrcSrc]);
+
+  useEffect(() => {
+    if (!isBoatKaraoke || !song.audioSrc) return;
+    const audio = new Audio(song.audioSrc);
+    audioRef.current = audio;
+
+    const onTimeUpdate = () => {
+      if (!audio.duration) return;
+      const t = audio.currentTime;
+      currentTimeRef.current = t;
+      setAudioProgress((t / audio.duration) * 100);
+
+      let idx = 0;
+      if (lrcLinesRef.current.length > 0) {
+        const lines = lrcLinesRef.current;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (t >= lines[i].time) {
+            idx = i;
+            break;
+          }
+        }
+      } else {
+        idx = Math.min(
+          Math.floor((t / audio.duration) * Math.max(1, activeLyricsRef.current.length)),
+          Math.max(0, activeLyricsRef.current.length - 1)
+        );
+      }
+
+      const bounds = getSegmentBoundsRef.current(idx);
+      const segmentDuration = Math.max(0.2, bounds.end - bounds.start);
+      const segmentProgress = karaokeClamp((t - bounds.start) / segmentDuration, 0, 1);
+      setCurrentLyricIndex(idx);
+      setLyricProgress(segmentProgress * 100);
+      setSegmentWindow(bounds);
+    };
+
+    const onEnded = () => {
+      finalizeLineScoreRef.current(currentLyricIndexRef.current);
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('ended', onEnded);
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('ended', onEnded);
+      audioRef.current = null;
+    };
+  }, [isBoatKaraoke, song.audioSrc]);
+
+  useEffect(() => {
+    const prev = previousLyricIndexRef.current;
+    if (isBoatKaraoke && isPlaying && prev !== currentLyricIndex) {
+      finalizeLineScoreRef.current(prev);
+      resetSegmentStats();
+      setSegmentWindow(getSegmentBoundsRef.current(currentLyricIndex));
+      previousLyricIndexRef.current = currentLyricIndex;
+    }
+  }, [currentLyricIndex, isBoatKaraoke, isPlaying]);
+
+  useEffect(() => {
+    if (!isBoatKaraoke || !isPkActive) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicStatus('unsupported');
+      setScoringMode('rhythm');
+      return;
+    }
+
+    let cancelled = false;
+    setMicStatus('requesting');
+
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        mediaStreamRef.current = stream;
+        setMicStatus('ready');
+
+        const AudioCtx: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) {
+          setMicStatus('unsupported');
+          setScoringMode('rhythm');
+          return;
+        }
+
+        const audioContext = new AudioCtx();
+        audioContextRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.85;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+        analyserBufferRef.current = new Uint8Array(analyser.fftSize);
+
+        const tick = () => {
+          if (!analyserRef.current || !analyserBufferRef.current) return;
+          analyserRef.current.getByteTimeDomainData(analyserBufferRef.current);
+          let sumSq = 0;
+          for (const v of analyserBufferRef.current) {
+            const n = (v - 128) / 128;
+            sumSq += n * n;
+          }
+          const rms = Math.sqrt(sumSq / analyserBufferRef.current.length);
+          const isActive = rms > 0.018;
+
+          if (isPlayingRef.current && isPkActive) {
+            const stats = segmentStatsRef.current;
+            stats.samples += 1;
+            if (isActive) {
+              stats.activeSamples += 1;
+              if (stats.firstActiveTime == null) stats.firstActiveTime = currentTimeRef.current;
+            }
+          }
+
+          meterRafRef.current = requestAnimationFrame(tick);
+        };
+        meterRafRef.current = requestAnimationFrame(tick);
+
+        const SpeechRecognitionCtor = ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => SpeechRecognitionLike) | undefined;
+        if (!SpeechRecognitionCtor) {
+          setScoringMode('rhythm');
+          return;
+        }
+
+        const recognition = new SpeechRecognitionCtor();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.onresult = (event: any) => {
+          let transcriptChunk = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcriptChunk += event.results[i]?.[0]?.transcript ?? '';
+          }
+          if (transcriptChunk.trim()) {
+            segmentStatsRef.current.transcript = `${segmentStatsRef.current.transcript} ${transcriptChunk}`.trim();
+          }
+        };
+        recognition.onerror = () => {
+          setScoringMode('rhythm');
+          stopRecognition();
+        };
+        recognition.onend = () => {
+          recognitionRunningRef.current = false;
+          if (recognitionShouldRunRef.current) {
+            try {
+              recognition.start();
+              recognitionRunningRef.current = true;
+            } catch (_) {}
+          }
+        };
+        recognitionRef.current = recognition;
+        setScoringMode('recognition');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMicStatus('denied');
+          setScoringMode('rhythm');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      stopMicPipeline();
+    };
+  }, [isBoatKaraoke, isPkActive]);
+
+  useEffect(() => {
+    if (!isBoatKaraoke || !isPkActive || !recognitionRef.current || scoringMode !== 'recognition') return;
+    recognitionShouldRunRef.current = isPlaying;
+    if (isPlaying && !recognitionRunningRef.current) {
+      try {
+        recognitionRef.current.start();
+        recognitionRunningRef.current = true;
+      } catch (_) {}
+      return;
+    }
+    if (!isPlaying && recognitionRunningRef.current) {
+      stopRecognition();
+    }
+  }, [isBoatKaraoke, isPkActive, isPlaying, scoringMode]);
+
+  useEffect(() => {
+    return () => {
+      stopMicPipeline();
+    };
+  }, []);
 
   const handleTogglePlay = () => {
     sfxService.playClick();
+    if (isBoatKaraoke && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.play()
+          .then(() => setIsPlaying(true))
+          .catch(() => setIsPlaying(false));
+      }
+      return;
+    }
     setIsPlaying(!isPlaying);
   };
 
-  const totalProgress = song.content.lyrics.length > 0
-    ? Math.min(100, (currentLyricIndex * 100 + lyricProgress) / song.content.lyrics.length)
-    : 0;
+  const startPk = () => {
+    sfxService.playClick();
+    setIsPkActive(true);
+    setScoreLeft(0);
+    setScoreRight(0);
+    scoredLineRef.current = {};
+    resetSegmentStats();
+    setCurrentLyricIndex(0);
+    previousLyricIndexRef.current = 0;
+    setLyricProgress(0);
+    setAudioProgress(0);
+    setSegmentWindow(getSegmentBoundsRef.current(0));
+
+    if (isBoatKaraoke && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      currentTimeRef.current = 0;
+      audioRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setIsPlaying(false));
+      return;
+    }
+    setIsPlaying(true);
+  };
+
+  const jumpLyric = (offset: number) => {
+    sfxService.playClick();
+    const lyricsLen = Math.max(1, activeLyrics.length);
+    const nextIndex = (currentLyricIndex + offset + lyricsLen) % lyricsLen;
+
+    if (isBoatKaraoke && audioRef.current) {
+      const bounds = getSegmentBoundsRef.current(nextIndex);
+      audioRef.current.currentTime = bounds.start;
+      currentTimeRef.current = bounds.start;
+      setCurrentLyricIndex(nextIndex);
+      setLyricProgress(0);
+      setSegmentWindow(bounds);
+      return;
+    }
+
+    setCurrentLyricIndex(nextIndex);
+    setLyricProgress(0);
+  };
+
+  const totalProgress = isBoatKaraoke
+    ? audioProgress
+    : (activeLyrics.length > 0
+      ? Math.min(100, (currentLyricIndex * 100 + lyricProgress) / activeLyrics.length)
+      : 0);
+
+  const micStatusText = {
+    idle: '等待开唱',
+    requesting: '请求麦克风',
+    ready: '麦克风已开启',
+    denied: '麦克风被拒绝',
+    unsupported: '麦克风不可用',
+  }[micStatus];
+
+  const scoringModeText = scoringMode === 'recognition' ? '语音识别评分' : '节奏评分';
+
+  const getWordProgress = (lyric: string, progress: number) => {
+    const tokens = lyric.split(/(\s+)/).filter(token => token.length > 0);
+    const wordCount = tokens.reduce((acc, token) => acc + (/^\s+$/.test(token) ? 0 : 1), 0);
+    const normalized = karaokeClamp(progress, 0, 100) / 100;
+    const revealedWordCount = Math.min(wordCount, Math.floor(normalized * wordCount));
+    const progressPercent = wordCount > 0 ? (revealedWordCount / wordCount) * 100 : 0;
+    return { tokens, wordCount, revealedWordCount, progressPercent };
+  };
+
+  const renderWordByWordLyric = (lyric: string) => {
+    const info = getWordProgress(lyric, lyricProgress);
+    let currentWord = 0;
+    const nodes = info.tokens.map((token, tokenIndex) => {
+      if (/^\s+$/.test(token)) {
+        return <span key={`space-${tokenIndex}`}>{token}</span>;
+      }
+      const revealed = currentWord < info.revealedWordCount;
+      currentWord += 1;
+      return (
+        <span
+          key={`word-${tokenIndex}`}
+          className={revealed
+            ? 'text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-yellow-400 to-pink-500 drop-shadow-[0_0_25px_rgba(236,72,153,0.7)]'
+            : 'text-white/14'}
+        >
+          {token}
+        </span>
+      );
+    });
+    return { nodes, progressPercent: info.progressPercent };
+  };
 
   return (
     <motion.div
@@ -931,15 +1481,7 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
             </div>
           ) : (
             <button 
-              onClick={() => {
-                sfxService.playClick();
-                setIsPkActive(true);
-                setIsPlaying(true);
-                setCurrentLyricIndex(0);
-                setLyricProgress(0);
-                setScoreLeft(0);
-                setScoreRight(0);
-              }}
+              onClick={startPk}
               className="flex items-center gap-2 px-4 md:px-6 py-2 md:py-2.5 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl md:rounded-2xl font-headline font-black text-sm md:text-lg shadow-[0_4px_0_#9a3412] md:shadow-[0_6px_0_#9a3412] active:translate-y-1 active:shadow-none transition-all hover:scale-105"
             >
               <Users size={18} className="md:size-[24px]" />
@@ -948,6 +1490,19 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
           )}
         </div>
       </nav>
+      {isBoatKaraoke && (
+        <div className="relative z-40 -mt-2 mb-1 flex justify-center px-6 md:px-10">
+          <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3 rounded-full border border-white/20 bg-white/10 px-3 md:px-5 py-1.5 text-[10px] md:text-xs font-bold text-white/90 backdrop-blur">
+            <span>🎤 {micStatusText}</span>
+            <span>•</span>
+            <span>{scoringModeText}</span>
+            <span>•</span>
+            <span>
+              [{segmentWindow.start.toFixed(1)}s - {segmentWindow.end.toFixed(1)}s]
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Main Stage */}
       <main className="flex-grow flex flex-col items-center relative z-10 px-6 md:px-20 gap-2 md:gap-4 py-2 md:py-4 min-h-0">
@@ -1258,7 +1813,7 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
                 className="flex flex-col items-center absolute left-0 w-full"
                 style={{ top: 'calc(50% - 50px)' }}
               >
-                {song.content.lyrics.map((lyric, index) => {
+                {activeLyrics.map((lyric, index) => {
                   const isActive = index === currentLyricIndex;
                   const isNear = Math.abs(index - currentLyricIndex) <= 2;
                   
@@ -1272,25 +1827,26 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
                           animate={{ scale: 1 }}
                           className="relative inline-block transition-all max-w-full"
                         >
-                          {/* Background Lyrics (Gray) */}
-                          <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black text-white/10 leading-tight">
-                            {lyric}
-                          </h1>
-                          {/* Foreground Lyrics (Filled) */}
-                          <div 
-                            className="absolute top-0 left-0 overflow-hidden transition-all duration-100 ease-linear"
-                            style={{ width: `${lyricProgress}%` }}
-                          >
-                            <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-yellow-400 to-pink-500 leading-tight drop-shadow-[0_0_25px_rgba(236,72,153,0.7)] whitespace-nowrap">
-                              {lyric}
-                            </h1>
-                            {/* Rhythm Indicator (Bouncing Ball) */}
-                            <motion.div 
-                              animate={{ y: [0, -15, 0] }}
-                              transition={{ repeat: Infinity, duration: 0.5 }}
-                              className="absolute right-0 top-0 w-4 h-4 md:w-6 md:h-6 bg-yellow-400 rounded-full shadow-[0_0_20px_#fbbf24] -mr-2 md:-mr-3 mt-1 md:mt-1.5 z-50 border-2 border-white/30"
-                            />
-                          </div>
+                          {(() => {
+                            const wordLyric = renderWordByWordLyric(lyric);
+                            return (
+                              <>
+                                <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black leading-tight whitespace-pre-wrap">
+                                  {wordLyric.nodes}
+                                </h1>
+                                {/* Rhythm Indicator (Bouncing Ball) */}
+                                <motion.div 
+                                  animate={{ y: [0, -15, 0] }}
+                                  transition={{ repeat: Infinity, duration: 0.5 }}
+                                  className="absolute top-0 w-4 h-4 md:w-6 md:h-6 bg-yellow-400 rounded-full shadow-[0_0_20px_#fbbf24] mt-1 md:mt-1.5 z-50 border-2 border-white/30"
+                                  style={{
+                                    left: `${wordLyric.progressPercent}%`,
+                                    transform: 'translateX(-50%)',
+                                  }}
+                                />
+                              </>
+                            );
+                          })()}
                         </motion.div>
                       ) : (
                         <h1 className="font-headline text-2xl md:text-4xl font-black text-white/10 leading-tight opacity-20 scale-90 transition-all">
@@ -1304,25 +1860,27 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
             </div>
           ) : (
             <div className="relative inline-block mt-4 md:mt-8 max-w-full px-4">
-              {/* Background Lyrics (Gray) */}
-              <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black text-white/10 leading-tight">
-                {song.content.lyrics[currentLyricIndex]}
-              </h1>
-              {/* Foreground Lyrics (Filled) */}
-              <div 
-                className="absolute top-0 left-0 overflow-hidden transition-all duration-100 ease-linear"
-                style={{ width: `${lyricProgress}%` }}
-              >
-                <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-yellow-400 to-pink-500 leading-tight drop-shadow-[0_0_25px_rgba(236,72,153,0.7)] whitespace-nowrap">
-                  {song.content.lyrics[currentLyricIndex]}
-                </h1>
-                {/* Rhythm Indicator (Bouncing Ball) */}
-                <motion.div 
-                  animate={{ y: [0, -15, 0] }}
-                  transition={{ repeat: Infinity, duration: 0.5 }}
-                  className="absolute right-0 top-0 w-4 h-4 md:w-6 md:h-6 bg-yellow-400 rounded-full shadow-[0_0_20px_#fbbf24] -mr-2 md:-mr-3 mt-1 md:mt-1.5 z-50 border-2 border-white/30"
-                />
-              </div>
+              {(() => {
+                const lyric = activeLyrics[currentLyricIndex] ?? '';
+                const wordLyric = renderWordByWordLyric(lyric);
+                return (
+                  <>
+                    <h1 className="font-headline text-3xl md:text-5xl lg:text-6xl font-black leading-tight whitespace-pre-wrap">
+                      {wordLyric.nodes}
+                    </h1>
+                    {/* Rhythm Indicator (Bouncing Ball) */}
+                    <motion.div 
+                      animate={{ y: [0, -15, 0] }}
+                      transition={{ repeat: Infinity, duration: 0.5 }}
+                      className="absolute top-0 w-4 h-4 md:w-6 md:h-6 bg-yellow-400 rounded-full shadow-[0_0_20px_#fbbf24] mt-1 md:mt-1.5 z-50 border-2 border-white/30"
+                      style={{
+                        left: `${wordLyric.progressPercent}%`,
+                        transform: 'translateX(-50%)',
+                      }}
+                    />
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -1342,11 +1900,7 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
         </div>
         <div className="flex items-center gap-4 md:gap-8">
           <button 
-            onClick={() => {
-              sfxService.playClick();
-              setCurrentLyricIndex(prev => (prev - 1 + song.content.lyrics.length) % song.content.lyrics.length);
-              setLyricProgress(0);
-            }}
+            onClick={() => jumpLyric(-1)}
             className="w-12 h-12 md:w-16 md:h-16 bg-white/10 text-white rounded-full flex items-center justify-center border-2 border-white/20 active:scale-90 transition-all"
           >
             <ChevronLeft size={24} className="md:size-[32px]" />
@@ -1358,11 +1912,7 @@ function KaraokeScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: (
             {isPlaying ? <Pause size={32} className="md:size-[56px]" fill="currentColor" /> : <PlayIcon size={32} className="md:size-[56px] ml-1 md:ml-2" fill="currentColor" />}
           </button>
           <button 
-            onClick={() => {
-              sfxService.playClick();
-              setCurrentLyricIndex(prev => (prev + 1) % song.content.lyrics.length);
-              setLyricProgress(0);
-            }}
+            onClick={() => jumpLyric(1)}
             className="w-12 h-12 md:w-16 md:h-16 bg-white/10 text-white rounded-full flex items-center justify-center border-2 border-white/20 active:scale-90 transition-all"
           >
             <ChevronLeft size={24} className="md:size-[32px] rotate-180" />
@@ -1381,7 +1931,208 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [lrcLines, setLrcLines] = useState<{ time: number; lyric: string }[]>([]);
   const lrcLinesRef = React.useRef<{ time: number; lyric: string }[]>([]);
+  const [pageRecordings, setPageRecordings] = useState<Record<number, string>>({});
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlayingMyBook, setIsPlayingMyBook] = useState(false);
+  const [readStatus, setReadStatus] = useState('');
+  const segmentTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const segmentEndTimeRef = React.useRef<number | null>(null);
+  const segmentOnFinishRef = React.useRef<(() => void) | undefined>(undefined);
+  const segmentFinishedRef = React.useRef(false);
+  const segmentTimeUpdateHandlerRef = React.useRef<(() => void) | null>(null);
+  const segmentEndedHandlerRef = React.useRef<(() => void) | null>(null);
+  const segmentLoadedMetadataHandlerRef = React.useRef<(() => void) | null>(null);
+  const segmentPlaybackTokenRef = React.useRef(0);
+  const recordStopTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = React.useRef<MediaStream | null>(null);
+  const myBookAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const myBookStopRef = React.useRef(false);
+  const recordingsStorageKey = `les-read-sing-book-${song.id}`;
+
   useEffect(() => { lrcLinesRef.current = lrcLines; }, [lrcLines]);
+
+  const clearSegmentTimer = () => {
+    if (segmentTimerRef.current) {
+      clearTimeout(segmentTimerRef.current);
+      segmentTimerRef.current = null;
+    }
+  };
+
+  const clearSegmentStopGuard = () => {
+    const audio = audioRef.current;
+    if (audio && segmentTimeUpdateHandlerRef.current) {
+      audio.removeEventListener('timeupdate', segmentTimeUpdateHandlerRef.current);
+    }
+    if (audio && segmentEndedHandlerRef.current) {
+      audio.removeEventListener('ended', segmentEndedHandlerRef.current);
+    }
+    if (audio && segmentLoadedMetadataHandlerRef.current) {
+      audio.removeEventListener('loadedmetadata', segmentLoadedMetadataHandlerRef.current);
+    }
+    segmentTimeUpdateHandlerRef.current = null;
+    segmentEndedHandlerRef.current = null;
+    segmentLoadedMetadataHandlerRef.current = null;
+    segmentEndTimeRef.current = null;
+    segmentOnFinishRef.current = undefined;
+    segmentFinishedRef.current = false;
+  };
+
+  const clearRecordStopTimer = () => {
+    if (recordStopTimerRef.current) {
+      clearTimeout(recordStopTimerRef.current);
+      recordStopTimerRef.current = null;
+    }
+  };
+
+  const getPageSegmentBounds = (pageIndex: number) => {
+    const audio = audioRef.current;
+    const lines = lrcLinesRef.current;
+    const duration =
+      audio && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : Math.max(8, pages.length * 5);
+
+    if (lines.length > 0) {
+      const lyricStart = pageIndex * 2;
+      const lyricEnd = lyricStart + 2;
+      const startTime = lines[lyricStart]?.time ?? (pageIndex / pages.length) * duration;
+      const endTime = lines[lyricEnd]?.time ?? ((pageIndex + 1) / pages.length) * duration;
+      return endTime > startTime ? { startTime, endTime } : { startTime, endTime: startTime + 3 };
+    }
+
+    const startTime = (pageIndex / pages.length) * duration;
+    const endTime = ((pageIndex + 1) / pages.length) * duration;
+    return endTime > startTime ? { startTime, endTime } : { startTime, endTime: startTime + 3 };
+  };
+
+  const stopMyBookPlayback = () => {
+    myBookStopRef.current = true;
+    if (myBookAudioRef.current) {
+      myBookAudioRef.current.pause();
+      myBookAudioRef.current = null;
+    }
+    setIsPlayingMyBook(false);
+  };
+
+  const stopFollowSing = (manual = false) => {
+    clearRecordStopTimer();
+    clearSegmentTimer();
+    clearSegmentStopGuard();
+
+    if (manual) {
+      audioRef.current?.pause();
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop();
+      } catch (_) {}
+      return;
+    }
+
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach(track => track.stop());
+      recordingStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  };
+
+  const playOriginalSegment = (pageIndex: number, onFinish?: () => void) => {
+    if (!song.audioSrc || !audioRef.current) {
+      onFinish?.();
+      return;
+    }
+    const audio = audioRef.current;
+    const playbackToken = segmentPlaybackTokenRef.current + 1;
+    segmentPlaybackTokenRef.current = playbackToken;
+
+    const playNow = () => {
+      if (segmentPlaybackTokenRef.current !== playbackToken) return;
+      segmentLoadedMetadataHandlerRef.current = null;
+
+      const { startTime, endTime } = getPageSegmentBounds(pageIndex);
+      clearSegmentTimer();
+      clearSegmentStopGuard();
+
+      const finiteDuration =
+        Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+      const safeStart = finiteDuration == null
+        ? Math.max(0, startTime)
+        : Math.max(0, Math.min(startTime, Math.max(0, finiteDuration - 0.05)));
+      const safeEndRaw = finiteDuration == null
+        ? endTime
+        : Math.min(endTime, finiteDuration);
+      const safeEnd = safeEndRaw > safeStart + 0.1 ? safeEndRaw : safeStart + 0.5;
+
+      audio.currentTime = safeStart;
+      segmentEndTimeRef.current = safeEnd;
+      segmentOnFinishRef.current = onFinish;
+      segmentFinishedRef.current = false;
+
+      const forceStopCurrentSegment = () => {
+        if (segmentPlaybackTokenRef.current !== playbackToken || segmentFinishedRef.current) return;
+        segmentFinishedRef.current = true;
+        clearSegmentTimer();
+        if (segmentEndTimeRef.current != null && Number.isFinite(segmentEndTimeRef.current)) {
+          try {
+            audio.currentTime = segmentEndTimeRef.current;
+          } catch (_) {}
+        }
+        audio.pause();
+        const finishCb = segmentOnFinishRef.current;
+        clearSegmentStopGuard();
+        finishCb?.();
+      };
+
+      segmentTimeUpdateHandlerRef.current = () => {
+        if (segmentEndTimeRef.current == null) return;
+        if (audio.currentTime >= segmentEndTimeRef.current - 0.02) {
+          forceStopCurrentSegment();
+        }
+      };
+      audio.addEventListener('timeupdate', segmentTimeUpdateHandlerRef.current);
+      segmentEndedHandlerRef.current = () => {
+        forceStopCurrentSegment();
+      };
+      audio.addEventListener('ended', segmentEndedHandlerRef.current);
+
+      audio.play().catch(() => {
+        forceStopCurrentSegment();
+      });
+      segmentTimerRef.current = setTimeout(() => {
+        forceStopCurrentSegment();
+      }, Math.max(100, (safeEnd - safeStart) * 1000));
+    };
+
+    if (audio.readyState >= 1) {
+      playNow();
+    } else {
+      segmentLoadedMetadataHandlerRef.current = playNow;
+      audio.addEventListener('loadedmetadata', playNow, { once: true });
+      audio.load();
+    }
+  };
+
+  const persistRecordings = (recordings: Record<number, string>) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(recordingsStorageKey, JSON.stringify(recordings));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const blobToDataUrl = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.readAsDataURL(blob);
+    });
 
   // Fetch and parse LRC file
   useEffect(() => {
@@ -1396,59 +2147,78 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
   useEffect(() => {
     if (!song.audioSrc) return;
     audioRef.current = new Audio(song.audioSrc);
-    return () => { audioRef.current?.pause(); };
+    return () => {
+      clearSegmentTimer();
+      clearSegmentStopGuard();
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
   }, [song.audioSrc]);
 
-  // Auto-play the corresponding audio segment when page or LRC data changes
+  // Load saved recordings for this song
   useEffect(() => {
-    if (!song.audioSrc || !audioRef.current) return;
-    const audio = audioRef.current;
-
-    const playSegment = () => {
-      const lines = lrcLinesRef.current;
-      let startTime: number;
-      let endTime: number;
-
-      if (lines.length > 0) {
-        // LRC-based: each story page covers 2 lyric lines
-        const lyricStart = currentPage * 2;
-        const lyricEnd   = lyricStart + 2;
-        startTime = lines[lyricStart]?.time ?? 0;
-        endTime   = lines[lyricEnd]?.time   ?? audio.duration;
-      } else {
-        // Fallback: divide evenly
-        startTime = (currentPage / pages.length) * audio.duration;
-        endTime   = ((currentPage + 1) / pages.length) * audio.duration;
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(recordingsStorageKey);
+      if (!raw) {
+        setPageRecordings({});
+        return;
       }
-
-      audio.currentTime = startTime;
-      audio.play().catch(() => {});
-      const timer = setTimeout(() => audio.pause(), (endTime - startTime) * 1000);
-      return timer;
-    };
-
-    let timer: ReturnType<typeof setTimeout>;
-    if (audio.readyState >= 1) {
-      timer = playSegment();
-    } else {
-      audio.addEventListener('loadedmetadata', () => { timer = playSegment(); }, { once: true });
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      const normalized: Record<number, string> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        const idx = Number(key);
+        if (Number.isInteger(idx) && idx >= 0 && typeof value === 'string' && value.length > 0) {
+          normalized[idx] = value;
+        }
+      }
+      setPageRecordings(normalized);
+    } catch (_) {
+      setPageRecordings({});
     }
-    return () => { clearTimeout(timer); audio.pause(); };
-  }, [currentPage, song.audioSrc, lrcLines]);
+  }, [recordingsStorageKey]);
+
+  // Auto-play the corresponding audio segment when page or LRC data changes (unless recording or playing user book)
+  useEffect(() => {
+    if (!song.audioSrc || !audioRef.current || isRecording || isPlayingMyBook) return;
+    playOriginalSegment(currentPage);
+    return () => {
+      clearSegmentTimer();
+      clearSegmentStopGuard();
+      audioRef.current?.pause();
+    };
+  }, [currentPage, isPlayingMyBook, isRecording, song.audioSrc, lrcLines]);
+
+  useEffect(() => {
+    return () => {
+      stopFollowSing(true);
+      stopMyBookPlayback();
+      clearSegmentTimer();
+      clearSegmentStopGuard();
+      clearRecordStopTimer();
+    };
+  }, []);
 
   const handleBack = () => {
     sfxService.playClick();
+    stopFollowSing(true);
+    stopMyBookPlayback();
+    clearSegmentTimer();
     onBack();
   };
 
   const handleNavigate = (s: Screen) => {
     sfxService.playClick();
+    stopFollowSing(true);
+    stopMyBookPlayback();
+    clearSegmentTimer();
     onNavigate(s);
   };
 
   const nextPage = () => {
     if (currentPage < pages.length - 1) {
       sfxService.playClick();
+      stopFollowSing(true);
       setCurrentPage(currentPage + 1);
     }
   };
@@ -1456,6 +2226,7 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
   const prevPage = () => {
     if (currentPage > 0) {
       sfxService.playClick();
+      stopFollowSing(true);
       setCurrentPage(currentPage - 1);
     }
   };
@@ -1464,6 +2235,196 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
     sfxService.playClick();
     setIsEnglish(!isEnglish);
   };
+
+  const replayCurrentPage = () => {
+    sfxService.playClick();
+    stopMyBookPlayback();
+    if (!song.audioSrc || !audioRef.current) {
+      setReadStatus('当前歌曲没有原声音频，无法重听。');
+      return;
+    }
+    setReadStatus(`正在重听第 ${currentPage + 1} 页`);
+    playOriginalSegment(currentPage);
+  };
+
+  const startFollowSing = async () => {
+    sfxService.playClick();
+
+    if (isRecording) {
+      stopFollowSing(true);
+      setReadStatus(`已停止第 ${currentPage + 1} 页跟唱录制`);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setReadStatus('当前浏览器不支持录音，请更换浏览器后重试。');
+      return;
+    }
+
+    stopMyBookPlayback();
+    clearSegmentTimer();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      const pageIndexAtStart = currentPage;
+      const chunks: Blob[] = [];
+
+      const candidateMimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      const pickedMime =
+        typeof (MediaRecorder as any).isTypeSupported === 'function'
+          ? candidateMimes.find((m) => (MediaRecorder as any).isTypeSupported(m))
+          : undefined;
+      const recorder = pickedMime ? new MediaRecorder(stream, { mimeType: pickedMime }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) chunks.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        setIsRecording(false);
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach(track => track.stop());
+          recordingStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(chunks, { type: mimeType });
+        if (blob.size === 0) {
+          setReadStatus('没有录到有效声音，请重试。');
+          return;
+        }
+
+        try {
+          const dataUrl = await blobToDataUrl(blob);
+          setPageRecordings(prev => {
+            const next = { ...prev, [pageIndexAtStart]: dataUrl };
+            persistRecordings(next);
+            return next;
+          });
+          setReadStatus(`第 ${pageIndexAtStart + 1} 页跟唱已保存`);
+        } catch (_) {
+          setReadStatus('录音已完成，但保存失败，请重试。');
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setReadStatus(`正在跟唱录制第 ${pageIndexAtStart + 1} 页...`);
+
+      if (song.audioSrc && audioRef.current) {
+        playOriginalSegment(pageIndexAtStart, () => {
+          stopFollowSing(false);
+        });
+      } else {
+        // Fallback free-sing recording window
+        clearRecordStopTimer();
+        recordStopTimerRef.current = setTimeout(() => {
+          stopFollowSing(false);
+        }, 6000);
+      }
+    } catch (_) {
+      setReadStatus('未获得麦克风权限，无法跟唱录制。');
+    }
+  };
+
+  const saveMyBook = () => {
+    sfxService.playClick();
+    const ok = persistRecordings(pageRecordings);
+    if (!ok) {
+      setReadStatus('作品保存失败（存储空间或权限不足）。');
+      return;
+    }
+    setReadStatus(`已保存绘本作品（${Object.keys(pageRecordings).length} 页）`);
+  };
+
+  const playCurrentPageRecording = () => {
+    sfxService.playClick();
+    const clip = pageRecordings[currentPage];
+    if (!clip) {
+      setReadStatus('当前页还没有跟唱作品。');
+      return;
+    }
+    stopMyBookPlayback();
+    clearSegmentTimer();
+    audioRef.current?.pause();
+    const audio = new Audio(clip);
+    myBookAudioRef.current = audio;
+    setReadStatus(`正在播放第 ${currentPage + 1} 页跟唱作品`);
+    audio.onended = () => {
+      if (myBookAudioRef.current === audio) myBookAudioRef.current = null;
+    };
+    audio.onerror = () => {
+      if (myBookAudioRef.current === audio) myBookAudioRef.current = null;
+      setReadStatus('播放失败，请重试。');
+    };
+    audio.play().catch(() => {
+      setReadStatus('播放被浏览器拦截，请点击页面后重试。');
+    });
+  };
+
+  const playMyBook = async () => {
+    sfxService.playClick();
+
+    if (isPlayingMyBook) {
+      stopMyBookPlayback();
+      setReadStatus('已停止播放我的绘本。');
+      return;
+    }
+
+    const playlist = pages
+      .map((_, idx) => ({ idx, clip: pageRecordings[idx] }))
+      .filter((item) => Boolean(item.clip)) as Array<{ idx: number; clip: string }>;
+
+    if (playlist.length === 0) {
+      setReadStatus('还没有已保存的跟唱作品。');
+      return;
+    }
+
+    stopFollowSing(true);
+    clearSegmentTimer();
+    audioRef.current?.pause();
+    myBookStopRef.current = false;
+    setIsPlayingMyBook(true);
+    setReadStatus('正在播放我的绘本作品...');
+
+    for (const item of playlist) {
+      if (myBookStopRef.current) break;
+      setCurrentPage(item.idx);
+      await new Promise<void>((resolve) => {
+        const audio = new Audio(item.clip);
+        myBookAudioRef.current = audio;
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          audio.onended = null;
+          audio.onerror = null;
+          audio.onpause = null;
+          resolve();
+        };
+        audio.onended = finish;
+        audio.onerror = finish;
+        audio.onpause = () => {
+          if (myBookStopRef.current) finish();
+        };
+        audio.play().catch(() => finish());
+      });
+    }
+
+    const finishedNaturally = !myBookStopRef.current;
+    stopMyBookPlayback();
+    if (finishedNaturally) {
+      setReadStatus('我的绘本播放完成。');
+    }
+  };
+
+  const recordedCount = Object.keys(pageRecordings).length;
+  const hasCurrentRecording = Boolean(pageRecordings[currentPage]);
+  const kidButtonBase = 'h-24 md:h-28 rounded-3xl border-2 font-black transition-all active:scale-95 flex flex-col items-center justify-center gap-2';
+  const kidIconBubble = 'w-11 h-11 md:w-12 md:h-12 rounded-2xl border border-white/35 bg-white/15 flex items-center justify-center shadow-inner';
 
   // Helper to highlight the keyword in text
   const renderHighlightedText = (text: string, highlight: string) => {
@@ -1582,6 +2543,86 @@ function ReadScreen({ song, onBack, onNavigate }: { song: SongNode, onBack: () =
                   <p className="text-white/60 font-bold text-xl">
                     {isEnglish ? 'Key Word' : '重点单词'}
                   </p>
+                </div>
+
+                {/* Page Actions: replay, sing, save, playback */}
+                <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-4">
+                  <button
+                    onClick={replayCurrentPage}
+                    className={`${kidButtonBase} bg-white/10 border-white/25 text-white hover:bg-white/20`}
+                  >
+                    <div className={kidIconBubble}>
+                      <Volume2 size={24} />
+                    </div>
+                    <span className="text-sm md:text-base tracking-wide">重听</span>
+                  </button>
+                  <button
+                    onClick={startFollowSing}
+                    className={`${kidButtonBase} text-white ${
+                      isRecording
+                        ? 'bg-red-500/80 border-red-300 hover:bg-red-500'
+                        : 'bg-pink-500/30 border-pink-300/50 hover:bg-pink-500/40'
+                    }`}
+                  >
+                    <div className={`${kidIconBubble} relative`}>
+                      <Mic size={24} />
+                      {isRecording && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-300 rounded-full border border-white animate-pulse" />
+                      )}
+                    </div>
+                    <span className="text-sm md:text-base tracking-wide">{isRecording ? '停录' : '跟唱'}</span>
+                  </button>
+                  <button
+                    onClick={playCurrentPageRecording}
+                    disabled={!hasCurrentRecording}
+                    className={`${kidButtonBase} ${
+                      hasCurrentRecording
+                        ? 'bg-white/10 border-white/25 text-white hover:bg-white/20'
+                        : 'bg-white/5 border-white/10 text-white/30 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className={`${kidIconBubble} relative`}>
+                      <UserRound size={22} />
+                      <PlayIcon size={12} className="absolute -right-1 -bottom-1" fill="currentColor" />
+                    </div>
+                    <span className="text-sm md:text-base tracking-wide">听本页</span>
+                  </button>
+                  <button
+                    onClick={saveMyBook}
+                    disabled={recordedCount === 0}
+                    className={`${kidButtonBase} ${
+                      recordedCount > 0
+                        ? 'bg-green-500/20 border-green-300/40 text-green-100 hover:bg-green-500/30'
+                        : 'bg-white/5 border-white/10 text-white/30 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className={`${kidIconBubble} relative`}>
+                      <BookOpen size={22} />
+                      <CheckCircle2 size={12} className="absolute -right-1 -bottom-1" />
+                    </div>
+                    <span className="text-sm md:text-base tracking-wide">保存</span>
+                  </button>
+                  <button
+                    onClick={playMyBook}
+                    disabled={recordedCount === 0}
+                    className={`${kidButtonBase} ${
+                      recordedCount > 0
+                        ? 'bg-indigo-500/25 border-indigo-300/40 text-indigo-100 hover:bg-indigo-500/35'
+                        : 'bg-white/5 border-white/10 text-white/30 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className={`${kidIconBubble} relative`}>
+                      <Headphones size={22} />
+                      <BookOpen size={12} className="absolute -right-1 -bottom-1" />
+                    </div>
+                    <span className="text-sm md:text-base tracking-wide">{isPlayingMyBook ? '停绘本' : '听绘本'}</span>
+                  </button>
+                </div>
+
+                <div className="mt-2 text-sm text-white/70 font-semibold min-h-6">
+                  {readStatus || (isEnglish
+                    ? `Saved pages: ${recordedCount}/${pages.length}`
+                    : `已保存页数：${recordedCount}/${pages.length}`)}
                 </div>
               </div>
             </motion.div>
